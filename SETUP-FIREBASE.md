@@ -1,6 +1,6 @@
-# Connect DataApp Studio V1.4 to Firebase
+# Connect DataApp Studio V1.6 to Firebase
 
-This guide is written for the files in this ZIP. V1.4 keeps the V1.3 Firebase schema and security rules; its main change is the blank-canvas pupil tutorial.
+This guide is written for the files in this ZIP. V1.6 uses the V1.5 Firebase rules/publishing model and adds multi-page/list features inside the existing project snapshot structure.
 
 ## What Firebase is doing
 
@@ -371,3 +371,8 @@ A pupil's public app URL points to `published.html?id=RANDOM_ID`. The public Fir
 GitHub Pages must be served over HTTPS for Android PWA installation. Keep GitHub Pages **Enforce HTTPS** on.
 
 See `UPDATE-V1.5.md` for the exact file replacement and testing sequence.
+
+
+## V1.6 — multiple pages and database lists
+
+V1.6 adds pages, scrollable database lists and master/detail navigation. **No additional Firestore or Storage rule change is required if the V1.5 rules are already published.** See `UPDATE-V1.6.md` for the files to replace.

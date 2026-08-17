@@ -1,6 +1,6 @@
-# DataApp Studio — classroom V1.5
+# DataApp Studio — classroom V1.6
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.5 keeps the V1.4 blank-canvas tutorial and adds real Blockly visual programming plus public installable pupil apps with QR codes.
+A child-friendly database + app builder aimed at roughly age 12–13. V1.6 keeps the real Blockly + Android publishing foundation and adds multi-page apps plus Thunkable-style database lists with master/detail navigation.
 
 ## Pupil workflow
 
@@ -23,6 +23,26 @@ A child-friendly database + app builder aimed at roughly age 12–13. V1.5 keeps
 6. Add curriculum-safe images to the shared Image Bank.
 7. Regenerate a join code or remove a pupil when needed.
 
+
+
+## New in V1.6
+
+- pupils can create, rename, switch between and delete multiple app pages/screens;
+- every component belongs to a page, with automatic migration of V1.5 single-screen projects to a Home page;
+- real database-driven List component instead of placeholder rows;
+- list layouts: **Image only**, **Image + Title**, **Image + Title + Subtitle**, **Title + Subtitle**, or **Title only**;
+- image/title/subtitle each map to a chosen database field;
+- lists are vertically scrollable when there are many records;
+- tapping a list row makes that row the **current database record**;
+- a list can be configured to open another page when a row is tapped;
+- the easy list-navigation setting creates real Blockly `when list item tapped → go to page` blocks that pupils can inspect and edit;
+- new Blockly **list item tapped**, **go to page**, and **go back** blocks;
+- Page Open Blockly events now choose which page they belong to;
+- detail-page labels/images can use the existing **Connect Data** route to show fields from the selected list record;
+- Test and published Android/PWA apps both support the same multi-page/list navigation;
+- the guided first-app tutorial now teaches the common **scrollable list → details page** pattern from a blank project.
+
+No Firestore or Storage rule change is required from V1.5. See `UPDATE-V1.6.md`.
 
 ## New in V1.5
 

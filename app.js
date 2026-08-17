@@ -98,6 +98,7 @@ const projectTemplates = {
     tableName:'MyData',
     fields:[],
     records:[],
+    pages:[{id:'screen1',name:'Home'}],
     components:[],
     program:[],
     tutorialEnabled:true,
@@ -112,6 +113,26 @@ function freshBlankProject(name='My New App', assignmentId=''){
   project.publish.appName=project.name;
   project.assignmentId=assignmentId||'';
   project.tutorialEnabled=true;
+  return normaliseProject(project);
+}
+function normaliseProject(project){
+  project=project||freshBlankProject();
+  if(!Array.isArray(project.pages)||!project.pages.length) project.pages=[{id:'screen1',name:'Home'}];
+  project.pages=project.pages.map((pg,i)=>({id:pg.id||`screen${i+1}`,name:pg.name||`Page ${i+1}`}));
+  const first=project.pages[0].id;
+  project.components=Array.isArray(project.components)?project.components:[];
+  for(const c of project.components){
+    if(!c.pageId||!project.pages.some(p=>p.id===c.pageId))c.pageId=first;
+    if(c.type==='list'){
+      c.listLayout=c.listLayout||'image-title-subtitle';
+      c.listImageField=c.listImageField||'';
+      c.listTitleField=c.listTitleField||'';
+      c.listSubtitleField=c.listSubtitleField||'';
+      c.navigateToPage=c.navigateToPage||'';
+    }
+  }
+  project.program=Array.isArray(project.program)?project.program:[];
+  for(const b of project.program)if(b.type==='event_open'&&!b.page)b.page=first;
   return project;
 }
 function isEmptyProject(project){
@@ -144,6 +165,8 @@ const state = {
   project: loadProject(),
   selectedComponent:null,
   currentRecord:0,
+  currentPageId:'screen1',
+  pageHistory:[],
   codeMode:'python',
   device:'phone',
   assignments:CLOUD_MODE?[]:loadAssignments(),
@@ -162,9 +185,10 @@ const state = {
   cloudStatus:CLOUD_MODE?'Waiting for sign-in':'Local preview mode',
   authError:''
 };
+state.currentPageId=state.project.pages?.[0]?.id||'screen1';
 
 function loadProject(){
-  try { return JSON.parse(localStorage.getItem('dataapp_project')) || freshBlankProject(); }
+  try { return normaliseProject(JSON.parse(localStorage.getItem('dataapp_project')) || freshBlankProject()); }
   catch { return freshBlankProject(); }
 }
 function saveProject(){
@@ -202,7 +226,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.5</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.6</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this account is not yet on the teacher allow-list.</p>
     <div class="notice"><b>Your Firebase UID</b><div class="uid-box">${escapeHtml(state.user.uid)}</div></div>
     <p class="muted">In Firestore create <b>teacherAllowlist → ${escapeHtml(state.user.uid)}</b> with the field <b>enabled = true</b>, then click Check again.</p>
@@ -212,7 +236,7 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.5 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.6 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -294,34 +318,43 @@ ${state.project.tutorialEnabled===false?'':tutorialPanel()}
 
 function tutorialSteps(){
   const fields=state.project.fields||[], records=state.project.records||[], comps=state.project.components||[], program=state.project.program||[];
-  const hasId=fields.some((f,i)=>i===0&&f.type==='number');
-  const hasDisplay=comps.some(c=>['label','image','list'].includes(c.type));
-  const hasButton=comps.some(c=>c.type==='button');
-  const connected=program.some(b=>b.type==='set_field');
-  const clickEvent=program.some(b=>b.type==='event_click');
-  const moves=program.some(b=>['next_record','prev_record'].includes(b.type));
+  const lists=comps.filter(c=>c.type==='list');
+  const configuredList=lists.find(c=>(!c.listLayout?.includes('image')||c.listImageField)&&(!c.listLayout?.includes('title')||c.listTitleField)&&(!c.listLayout?.includes('subtitle')||c.listSubtitleField));
+  const hasSecondPage=(state.project.pages||[]).length>=2;
+  const listNavigates=lists.some(c=>c.navigateToPage);
+  const detailPageIds=new Set(lists.map(c=>c.navigateToPage).filter(Boolean));
+  const detailComponents=comps.filter(c=>detailPageIds.has(c.pageId)&&['label','image'].includes(c.type));
+  const detailConnected=detailComponents.length>0&&detailComponents.some(c=>program.some(b=>b.type==='set_field'&&b.target===c.id));
+  const listEvent=program.some(b=>b.type==='event_list_click');
+  const navBlock=program.some(b=>b.type==='navigate_page');
   return [
     {tab:'data',title:'Name your app and database',done:state.project.name!=='My New App'&&state.project.tableName!=='MyData',
-      text:'Choose your own idea. Give the app a name, then name the database table that will hold its information.',
-      tip:'Examples of table names: Animals, Films, Players, Recipes or Places.'},
+      text:'Choose your own app idea. Give the app a name, then name the database table that will hold its information.',
+      tip:'Examples: Songs, Films, Players, Recipes, Animals or Places.'},
     {tab:'data',title:'Create your fields',done:fields.length>=3,
-      text:'Click + Add field and create at least three columns. A field is one type of information you want to store.',
-      tip:`Good start: ID as Number, then your own Text fields${hasId?' — your first numeric ID field is ready.':'. Make the first field an ID number if you can.'}`},
+      text:'Create at least three database fields. Think about what you want each item in your list to show.',
+      tip:'A useful list often has an ID, a title/name, a subtitle/category and an image field.'},
     {tab:'data',title:'Add your records',done:records.length>=3,
-      text:'Click + Add record at least three times and type different information into each row. Each row is one record.',
-      tip:'Do not copy the same information three times — make each record genuinely different.'},
-    {tab:'design',title:'Design the phone screen',done:comps.length>=3&&hasDisplay&&hasButton,
-      text:'Go to Design and add the components your app needs. Drag them into position and change their text and size.',
-      tip:'Try a label, an image if you have an image field, and a Next button.'},
-    {tab:'design',title:'Connect screen to data',done:connected,
-      text:'Click a label or image on the phone, then click Connect Data. Choose which database field it should display.',
-      tip:'This creates real blocks for you to inspect — it does not fill the app with example data.'},
-    {tab:'blocks',title:'Make a button change record',done:clickEvent&&moves,
-      text:'In Blocks add “when button clicked”, then “next record” (or previous record). Add display blocks so the screen updates after the move.',
-      tip:'Programming is an event followed by actions: WHEN something happens → DO these instructions.'},
-    {tab:'test',title:'Test your app',done:state.tutorialTested===true,
-      text:'Run the app. Click your button and check that it moves through the records and displays the right information.',
-      tip:'If it does not work, use the What’s happening log rather than guessing.'}
+      text:'Add at least three different records. These rows will become the items in your app list.',
+      tip:'Try to use real-looking different data so you can tell whether the list and details page are working.'},
+    {tab:'design',title:'Build a scrollable list on Page 1',done:!!configuredList,
+      text:'Add a Database List. Choose its row layout, then choose which database fields supply the image, title and subtitle.',
+      tip:'You can use Image only, Image + Title, Image + Title + Subtitle, Title + Subtitle, or Title only.'},
+    {tab:'design',title:'Create a second page',done:hasSecondPage,
+      text:'Click + Add page and name it something like Details. This page will show more information about the item the user taps.',
+      tip:'Apps can now have several pages. Use the page tabs above the phone to switch between them while designing.'},
+    {tab:'design',title:'Design the details page',done:detailConnected,
+      text:'On your second page add labels/images and connect them to database fields with Connect Data.',
+      tip:'Because the tapped list row becomes the current record, these components will show the correct item.'},
+    {tab:'design',title:'Make the list open the details page',done:listNavigates&&listEvent&&navBlock,
+      text:'Select the List on Page 1 and choose your Details page under “When a row is tapped”. DataApp Studio creates the Blockly event and navigation block.',
+      tip:'Then open Blocks to inspect what was created: WHEN an item is tapped → GO TO Details.'},
+    {tab:'blocks',title:'Inspect the navigation blocks',done:listEvent&&navBlock,
+      text:'Look at the Blockly workspace. The list tap event is real code logic: the clicked row becomes the current record, then the app navigates to another page.',
+      tip:'You can also add button navigation or a Go back block.'},
+    {tab:'test',title:'Test the list and details page',done:state.tutorialTested===true,
+      text:'Run the app, scroll the list, tap different rows and check that the details page changes to match the selected record.',
+      tip:'Try the first, middle and last row so you know the selected record is being carried between pages.'}
   ];
 }
 function tutorialPanel(){
@@ -353,27 +386,84 @@ function dataCell(f,r,ri){
   return `<input data-record="${ri}" data-field="${f.id}" value="${escapeAttr(value)}" type="${type}">`;
 }
 
-function designView(){return `<div class="section-head"><div><h2>Design your app</h2><p>Add components, drag them around the device, then connect them to data.</p></div><button class="btn good" data-tab="test">▶ Test app</button></div>
-<div class="design-grid">
-<aside class="toolbox"><h3>Components</h3>${[['label','🔤','Text / Label'],['image','🖼️','Image'],['button','🔘','Button'],['input','⌨️','Text box'],['list','☷','List']].map(c=>`<button class="component-btn" data-add-component="${c[0]}"><span>${c[1]}</span><span>${c[2]}</span></button>`).join('')}<div class="empty-note" style="margin-top:14px"><b>Easy route:</b><br>Add a component → click it → choose <b>Connect Data</b>.</div></aside>
-<section class="workspace-panel"><div class="device-wrap"><div class="device-switch">${[['phone','Phone'],['large','Large phone'],['tablet','Tablet']].map(d=>`<button data-device="${d[0]}" class="${state.device===d[0]?'active':''}">${d[1]}</button>`).join('')}</div>${phoneMarkup('design')}</div></section>
-<aside class="properties">${propertiesMarkup()}</aside>
-</div>`}
+function currentPage(){
+  return state.project.pages.find(p=>p.id===state.currentPageId)||state.project.pages[0];
+}
+function pageName(id){return state.project.pages.find(p=>p.id===id)?.name||'Page';}
+function componentsOnPage(pageId=state.currentPageId){return state.project.components.filter(c=>(c.pageId||state.project.pages[0]?.id)===pageId);}
+function fieldOptionsHtml(selected='',type='any',blank='Choose field…'){
+  const fields=state.project.fields.filter(f=>type==='image'?f.type==='image':type==='text'?f.type!=='image':true);
+  return `<option value="">${blank}</option>`+fields.map(f=>`<option value="${f.id}" ${f.id===selected?'selected':''}>${escapeHtml(f.name)} · ${escapeHtml(f.type)}</option>`).join('');
+}
+function pageOptionsHtml(selected='',exclude=''){
+  return `<option value="">Choose page…</option>`+state.project.pages.filter(p=>p.id!==exclude).map(p=>`<option value="${p.id}" ${p.id===selected?'selected':''}>${escapeHtml(p.name)}</option>`).join('');
+}
+function designView(){
+  const pg=currentPage();
+  return `<div class="section-head"><div><h2>Design your app</h2><p>Create more than one page, then place components on the selected page.</p></div><button class="btn good" data-tab="test">▶ Test app</button></div>
+  <div class="page-strip">
+    <div class="page-tabs">${state.project.pages.map((p,i)=>`<button class="page-tab ${p.id===state.currentPageId?'active':''}" data-page-select="${p.id}"><span>${escapeHtml(p.name)}</span><small>Page ${i+1}</small></button>`).join('')}</div>
+    <div class="page-actions"><button class="btn small" data-action="rename-page">Rename</button><button class="btn small" data-action="add-page">+ Add page</button>${state.project.pages.length>1?'<button class="btn small danger-text" data-action="delete-page">Delete page</button>':''}</div>
+  </div>
+  <div class="notice master-detail-note"><b>List → details pattern:</b> Put a List on one page, choose which database fields make its image/title/subtitle, then set <b>On tap → another page</b>. DataApp Studio creates the Blockly navigation event for you. The tapped row becomes the current record.</div>
+  <div class="design-grid">
+  <aside class="toolbox"><h3>Components</h3>${[['label','🔤','Text / Label'],['image','🖼️','Image'],['button','🔘','Button'],['input','⌨️','Text box'],['list','☷','Database List']].map(c=>`<button class="component-btn" data-add-component="${c[0]}"><span>${c[1]}</span><span>${c[2]}</span></button>`).join('')}<div class="empty-note" style="margin-top:14px"><b>Selected page:</b><br>${escapeHtml(pg?.name||'Page')}</div></aside>
+  <section class="workspace-panel"><div class="device-wrap"><div class="device-switch">${[['phone','Phone'],['large','Large phone'],['tablet','Tablet']].map(d=>`<button data-device="${d[0]}" class="${state.device===d[0]?'active':''}">${d[1]}</button>`).join('')}</div>${phoneMarkup('design')}</div></section>
+  <aside class="properties">${propertiesMarkup()}</aside>
+  </div>`;
+}
 function propertiesMarkup(){
   const c=state.project.components.find(x=>x.id===state.selectedComponent);
-  if(!c) return `<h3>Properties</h3><div class="empty-note">Click a component on the phone to change its properties.</div>`;
+  if(!c) return `<h3>Properties</h3><div class="empty-note">Click a component on ${escapeHtml(currentPage()?.name||'this page')} to change its properties.</div>`;
   return `<h3>${escapeHtml(c.name)}</h3>
   <div class="prop-group"><label>Name</label><input data-prop="name" value="${escapeAttr(c.name)}"></div>
   ${c.type!=='image'&&c.type!=='list'?`<div class="prop-group"><label>Text</label><input data-prop="text" value="${escapeAttr(c.text||'')}"></div>`:''}
   ${c.type==='image'?`<div class="prop-group"><label>Image</label><div class="property-image-preview"><img src="${escapeAttr(resolveImage(c.src))}" alt=""></div><button class="btn" style="width:100%" data-action="choose-component-image">🖼 Choose image</button></div>`:''}
   ${c.type==='label'?`<div class="prop-group"><label>Font size</label><input data-prop="fontSize" type="number" min="10" max="48" value="${c.fontSize||16}"></div><div class="prop-group"><label>Alignment</label><select data-prop="align"><option ${c.align==='left'?'selected':''}>left</option><option ${c.align==='center'?'selected':''}>center</option><option ${c.align==='right'?'selected':''}>right</option></select></div>`:''}
+  ${c.type==='list'?listPropertiesMarkup(c):''}
   <div class="prop-group"><label>Width</label><input data-prop="w" type="number" value="${c.w}"></div><div class="prop-group"><label>Height</label><input data-prop="h" type="number" value="${c.h}"></div>
   ${['label','image','input'].includes(c.type)?`<button class="btn connect" style="width:100%;margin-bottom:8px" data-action="connect-data">🔗 Connect Data</button><div class="connection-note">${connectionsFor(c.id)}</div>`:''}
   <button class="btn small" style="width:100%;color:var(--danger)" data-action="delete-component">Delete component</button>`
 }
-
+function listPropertiesMarkup(c){
+  const layouts=[
+    ['image-title-subtitle','Image + title + subtitle'],
+    ['image-title','Image + title'],
+    ['image-only','Image only'],
+    ['title-subtitle','Title + subtitle'],
+    ['title-only','Title only']
+  ];
+  const needsImage=c.listLayout?.includes('image');
+  const needsTitle=c.listLayout?.includes('title');
+  const needsSubtitle=c.listLayout?.includes('subtitle');
+  return `<div class="list-props">
+    <div class="prop-section-title">Database list</div>
+    <div class="prop-group"><label>Row layout</label><select data-list-prop="listLayout">${layouts.map(([v,n])=>`<option value="${v}" ${c.listLayout===v?'selected':''}>${n}</option>`).join('')}</select></div>
+    ${needsImage?`<div class="prop-group"><label>Image field</label><select data-list-prop="listImageField">${fieldOptionsHtml(c.listImageField,'image')}</select></div>`:''}
+    ${needsTitle?`<div class="prop-group"><label>Title field</label><select data-list-prop="listTitleField">${fieldOptionsHtml(c.listTitleField,'text')}</select></div>`:''}
+    ${needsSubtitle?`<div class="prop-group"><label>Subtitle field</label><select data-list-prop="listSubtitleField">${fieldOptionsHtml(c.listSubtitleField,'text')}</select></div>`:''}
+    <div class="prop-group"><label>When a row is tapped</label><select data-list-prop="navigateToPage">${pageOptionsHtml(c.navigateToPage,c.pageId)}</select></div>
+    <div class="connection-note">${c.navigateToPage?`Tap → <b>${escapeHtml(pageName(c.navigateToPage))}</b>. The clicked row becomes the current record.`:'Choose a destination page to make the list open a details page.'}</div>
+  </div>`;
+}
 function phoneMarkup(mode='design'){
-  return `<div class="phone device-${state.device}"><div class="screen" data-phone-mode="${mode}">${state.project.components.map(c=>componentMarkup(c,mode)).join('')}</div></div>`;
+  const pageId=state.currentPageId||state.project.pages[0]?.id;
+  return `<div class="phone device-${state.device}"><div class="screen" data-phone-mode="${mode}" data-page-id="${escapeAttr(pageId)}">${componentsOnPage(pageId).map(c=>componentMarkup(c,mode)).join('')}</div></div>`;
+}
+function listRowsMarkup(c,mode){
+  const rows=state.project.records||[];
+  if(!rows.length)return `<div class="list-empty">No database records yet</div>`;
+  return rows.map((r,i)=>{
+    const image=c.listImageField?resolveImage(r[c.listImageField]):'';
+    const title=c.listTitleField?String(r[c.listTitleField]??''):'';
+    const subtitle=c.listSubtitleField?String(r[c.listSubtitleField]??''):'';
+    const rowClass=`data-list-row layout-${c.listLayout||'image-title-subtitle'}`;
+    return `<div class="${rowClass}" ${mode==='test'?`data-list-index="${i}"`:''}>
+      ${c.listLayout?.includes('image')?`<div class="list-row-image">${image?`<img src="${escapeAttr(image)}" alt="">`:'<span>🖼️</span>'}</div>`:''}
+      ${c.listLayout!=='image-only'?`<div class="list-row-copy">${c.listLayout?.includes('title')?`<strong>${escapeHtml(title||`Record ${i+1}`)}</strong>`:''}${c.listLayout?.includes('subtitle')?`<span>${escapeHtml(subtitle)}</span>`:''}</div>`:''}
+      ${c.navigateToPage?'<div class="list-row-arrow">›</div>':''}
+    </div>`;
+  }).join('');
 }
 function componentMarkup(c,mode){
   const sel=mode==='design'&&state.selectedComponent===c.id?'selected':'';
@@ -384,12 +474,12 @@ function componentMarkup(c,mode){
   if(c.type==='button') inner=`<button>${escapeHtml(c.text||'Button')}</button>`;
   if(c.type==='image') inner=`<img src="${escapeAttr(resolveImage(c.src))}" alt="">`;
   if(c.type==='input') inner=`<input placeholder="${escapeAttr(c.text||'Type here...')}">`;
-  if(c.type==='list') inner=`<div class="listbox"><div>Item 1</div><div>Item 2</div><div>Item 3</div></div>`;
+  if(c.type==='list') inner=`<div class="listbox database-list">${listRowsMarkup(c,mode)}</div>`;
   return `<div class="screen-component ${sel}" ${attrs} style="${style}">${inner}</div>`;
 }
 
 function blocksView(){return `<div class="section-head"><div><h2>Make it work with real Blockly</h2><p>Drag snap-together blocks from the toolbox. Put action blocks inside an event block.</p></div><button class="btn good" data-tab="test">▶ Run app</button></div>
-<div class="blockly-layout"><section class="blockly-card"><div class="blockly-help"><b>How it connects:</b> <span>Events decide <i>when</i>. Database blocks choose a record. Screen blocks put a database field into a component.</span></div><div id="blocklyDiv" class="blockly-workspace"></div></section>
+<div class="blockly-layout"><section class="blockly-card"><div class="blockly-help"><b>How it connects:</b> <span>Events decide <i>when</i>. A list tap automatically selects that record. Screen blocks display fields, and Navigation blocks move between pages.</span></div><div id="blocklyDiv" class="blockly-workspace"></div></section>
 <aside class="code-panel blockly-code"><div style="display:flex;justify-content:space-between;align-items:center"><h3>Show code</h3><span class="tag">Live</span></div><div class="code-toggle"><button data-code-mode="python" class="${state.codeMode==='python'?'active':''}">Python idea</button><button data-code-mode="plain" class="${state.codeMode==='plain'?'active':''}">Plain English</button></div><div class="codebox" id="generatedCode">${escapeHtml(generateCode())}</div><div class="mini-checks">${checklistBadges()}</div><div class="notice" style="margin-top:12px">Tip: the <b>Connect Data</b> button can create the first connection for you, then you can inspect the Blockly stack and build the next one yourself.</div></aside></div>`}
 
 function programMarkup(){
@@ -500,7 +590,7 @@ function bindCommon(){
     state.view='landing';state.role=null;state.user=null;state.classes=[];state.currentClass=null;render();
   });
   $$('[data-action="check-teacher"]').forEach(b=>b.onclick=async()=>{await finishSignedInUser(state.user,'teacher')});
-  $$('[data-action="open-builder"]').forEach(b=>b.onclick=()=>{state.view='builder';state.tab='data';if(state.project.tutorialEnabled===undefined)state.project.tutorialEnabled=true;render()});
+  $$('[data-action="open-builder"]').forEach(b=>b.onclick=()=>{state.project=normaliseProject(state.project);state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.view='builder';state.tab='data';if(state.project.tutorialEnabled===undefined)state.project.tutorialEnabled=true;render()});
   $$('[data-action="back-pupil"]').forEach(b=>b.onclick=()=>{state.view=state.role==='teacher'?'teacher':'pupil';render()});
   $$('[data-start-assignment]').forEach(b=>b.onclick=()=>startAssignment(b.dataset.startAssignment));
   $$('[data-select-class]').forEach(b=>b.onclick=()=>selectClass(b.dataset.selectClass));
@@ -521,7 +611,7 @@ function bindBuilder(){
   const manageImages=$('[data-action="manage-images"]'); if(manageImages)manageImages.onclick=showPersonalManager;
   const tutorialToggle=$('[data-action="toggle-tutorial"]'); if(tutorialToggle)tutorialToggle.onclick=()=>{state.project.tutorialEnabled=state.project.tutorialEnabled===false;saveProject();render()};
   $$('[data-tutorial-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tutorialTab;if(state.tab==='test')startTest(false);render()});
-  const reset=$('[data-action="reset"]'); if(reset) reset.onclick=()=>{if(confirm('Clear this project and start again from a blank canvas? This removes its fields, records, screen components and blocks.')){const name=state.project.name,assignmentId=state.project.assignmentId||'',tutorialEnabled=state.project.tutorialEnabled!==false;state.project=freshBlankProject(name,assignmentId);state.project.tutorialEnabled=tutorialEnabled;state.currentRecord=0;state.selectedComponent=null;saveProject();render()}};
+  const reset=$('[data-action="reset"]'); if(reset) reset.onclick=()=>{if(confirm('Clear this project and start again from a blank canvas? This removes its fields, records, screen components and blocks.')){const name=state.project.name,assignmentId=state.project.assignmentId||'',tutorialEnabled=state.project.tutorialEnabled!==false;state.project=freshBlankProject(name,assignmentId);state.project.tutorialEnabled=tutorialEnabled;state.currentRecord=0;state.currentPageId=state.project.pages[0].id;state.pageHistory=[];state.selectedComponent=null;saveProject();render()}};
 }
 
 function bindData(){
@@ -623,16 +713,71 @@ function showFieldModal(){
   $('#cancelModal').onclick=()=>wrap.remove();$('#createField').onclick=()=>{const name=$('#newFieldName').value.trim();if(!name)return;let id=name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||`field_${Date.now()}`;if(state.project.fields.some(f=>f.id===id)) id+=`_${Date.now().toString().slice(-4)}`;const type=$('#newFieldType').value;state.project.fields.push({id,name,type});state.project.records.forEach(r=>r[id]=type==='number'?0:'');wrap.remove();saveProject();render()};
 }
 
+function pruneProgram(deletedIds=new Set(),deletedPage=''){
+  const kept=[];let skipGroup=false;
+  for(const b of state.project.program){
+    if(['event_open','event_click','event_list_click'].includes(b.type)){
+      skipGroup=(b.type==='event_open'&&deletedPage&&(b.page||state.project.pages[0]?.id)===deletedPage)||(['event_click','event_list_click'].includes(b.type)&&deletedIds.has(b.component));
+      if(!skipGroup)kept.push(b);
+    }else if(!skipGroup&&!deletedIds.has(b.target)&&!(b.type==='navigate_page'&&deletedPage&&b.page===deletedPage))kept.push(b);
+  }
+  state.project.program=kept;state.project.blocklyState=null;
+}
 function bindDesign(){
-  $$('[data-add-component]').forEach(b=>b.onclick=()=>{const type=b.dataset.addComponent;const n=state.project.components.filter(c=>c.type===type).length+1;const c={id:`${type}_${Date.now()}`,type,name:`${cap(type)}${n}`,x:50,y:80+(n*30),w:type==='image'?220:200,h:type==='image'?150:type==='label'?44:type==='list'?110:44,text:type==='button'?'Button':type==='input'?'Type here...':type==='label'?'New label':'',fontSize:18,align:'center',src:type==='image'?imageSvg('🖼️','Your image'):''};state.project.components.push(c);state.selectedComponent=c.id;saveProject();render()});
+  $$('[data-page-select]').forEach(b=>b.onclick=()=>{state.currentPageId=b.dataset.pageSelect;state.selectedComponent=null;saveProject();render()});
+  const addPage=$('[data-action="add-page"]');if(addPage)addPage.onclick=()=>{
+    const n=state.project.pages.length+1;const id=`screen_${Date.now()}`;state.project.pages.push({id,name:`Page ${n}`});state.currentPageId=id;state.selectedComponent=null;saveProject();render();
+  };
+  const renamePage=$('[data-action="rename-page"]');if(renamePage)renamePage.onclick=()=>{
+    const pg=currentPage();const name=prompt('Page name:',pg?.name||'Page');if(name?.trim()){pg.name=name.trim().slice(0,30);saveProject();render()}
+  };
+  const deletePage=$('[data-action="delete-page"]');if(deletePage)deletePage.onclick=()=>{
+    if(state.project.pages.length<=1)return;const pg=currentPage();if(!confirm(`Delete ${pg.name} and all components on it?`))return;
+    const ids=new Set(state.project.components.filter(c=>c.pageId===pg.id).map(c=>c.id));
+    state.project.components=state.project.components.filter(c=>c.pageId!==pg.id);
+    pruneProgram(ids,pg.id);
+    for(const c of state.project.components)if(c.type==='list'&&c.navigateToPage===pg.id)c.navigateToPage='';
+    state.project.pages=state.project.pages.filter(p=>p.id!==pg.id);state.currentPageId=state.project.pages[0].id;state.selectedComponent=null;state.project.blocklyState=null;saveProject();render();
+  };
+  $$('[data-add-component]').forEach(b=>b.onclick=()=>{
+    const type=b.dataset.addComponent;const n=state.project.components.filter(c=>c.type===type).length+1;
+    const c={id:`${type}_${Date.now()}`,type,name:`${cap(type)}${n}`,pageId:state.currentPageId,x:30,y:75+(n*18),w:type==='image'?220:type==='list'?280:200,h:type==='image'?150:type==='label'?44:type==='list'?330:44,text:type==='button'?'Button':type==='input'?'Type here...':type==='label'?'New label':'',fontSize:18,align:'center',src:type==='image'?imageSvg('🖼️','Your image'):'',listLayout:'image-title-subtitle',listImageField:'',listTitleField:'',listSubtitleField:'',navigateToPage:''};
+    state.project.components.push(c);state.selectedComponent=c.id;saveProject();render()
+  });
   $$('.screen-component[data-component]').forEach(el=>{
-    el.onpointerdown=(e)=>{e.preventDefault();state.selectedComponent=el.dataset.component;const c=state.project.components.find(x=>x.id===state.selectedComponent);const startX=e.clientX,startY=e.clientY,origX=c.x,origY=c.y;const screen=el.closest('.screen');const maxW=screen.clientWidth,maxH=screen.clientHeight;el.setPointerCapture(e.pointerId);el.onpointermove=ev=>{c.x=Math.max(0,Math.min(maxW-c.w,origX+ev.clientX-startX));c.y=Math.max(36,Math.min(maxH-c.h,origY+ev.clientY-startY));el.style.left=c.x+'px';el.style.top=c.y+'px'};el.onpointerup=()=>{el.onpointermove=null;saveProject();render()};};
+    el.onpointerdown=(e)=>{
+      if(e.target.closest('.database-list')){const changed=state.selectedComponent!==el.dataset.component;state.selectedComponent=el.dataset.component;if(changed)render();return}
+      e.preventDefault();state.selectedComponent=el.dataset.component;const c=state.project.components.find(x=>x.id===state.selectedComponent);const startX=e.clientX,startY=e.clientY,origX=c.x,origY=c.y;const screen=el.closest('.screen');const maxW=screen.clientWidth,maxH=screen.clientHeight;el.setPointerCapture(e.pointerId);
+      el.onpointermove=ev=>{c.x=Math.max(0,Math.min(maxW-c.w,origX+ev.clientX-startX));c.y=Math.max(36,Math.min(maxH-c.h,origY+ev.clientY-startY));el.style.left=c.x+'px';el.style.top=c.y+'px'};
+      el.onpointerup=()=>{el.onpointermove=null;saveProject();render()};
+    };
   });
   $$('[data-prop]').forEach(inp=>inp.oninput=()=>{const c=state.project.components.find(x=>x.id===state.selectedComponent);let v=inp.value;if(['w','h','fontSize'].includes(inp.dataset.prop))v=Number(v);c[inp.dataset.prop]=v;saveProject();render()});
+  $$('[data-list-prop]').forEach(inp=>inp.onchange=()=>{
+    const c=state.project.components.find(x=>x.id===state.selectedComponent);if(!c||c.type!=='list')return;
+    c[inp.dataset.listProp]=inp.value;
+    if(inp.dataset.listProp==='navigateToPage')connectListNavigation(c);
+    saveProject();render();
+  });
   $$('[data-device]').forEach(btn=>btn.onclick=()=>{state.device=btn.dataset.device;render()});
   const chooseImage=$('[data-action="choose-component-image"]');if(chooseImage)chooseImage.onclick=()=>{const c=state.project.components.find(x=>x.id===state.selectedComponent);showMediaPicker({title:`Choose image for ${c.name}`,selected:c.src,onSelect:ref=>{c.src=ref;saveProject();render()}})};
   const connect=$('[data-action="connect-data"]');if(connect)connect.onclick=showConnectModal;
-  const del=$('[data-action="delete-component"]');if(del)del.onclick=()=>{const id=state.selectedComponent;state.project.components=state.project.components.filter(c=>c.id!==id);state.project.program=state.project.program.filter(b=>b.target!==id&&b.component!==id);state.project.blocklyState=null;state.selectedComponent=null;saveProject();render()};
+  const del=$('[data-action="delete-component"]');if(del)del.onclick=()=>{const id=state.selectedComponent;state.project.components=state.project.components.filter(c=>c.id!==id);pruneProgram(new Set([id]));state.selectedComponent=null;saveProject();render()};
+}
+function connectListNavigation(c){
+  const kept=[];let skipping=false;
+  for(const b of state.project.program){
+    if(['event_open','event_click','event_list_click'].includes(b.type)){
+      skipping=b.type==='event_list_click'&&b.component===c.id;
+      if(!skipping)kept.push(b);
+    }else if(!skipping)kept.push(b);
+  }
+  state.project.program=kept;
+  if(c.navigateToPage){
+    state.project.program.push({id:`b_${Date.now()}_list`,type:'event_list_click',component:c.id});
+    state.project.program.push({id:`b_${Date.now()}_nav`,type:'navigate_page',page:c.navigateToPage});
+  }
+  state.project.blocklyState=null;
 }
 
 function bindBlocks(){
@@ -641,7 +786,7 @@ function bindBlocks(){
     requestAnimationFrame(async()=>{
       try{
         state.blocklyWorkspace=await initBlocklyEditor({
-          element:host,project:state.project,components:state.project.components,fields:state.project.fields,
+          element:host,project:state.project,components:state.project.components,fields:state.project.fields,pages:state.project.pages,
           onChange:({blocklyState,program})=>{
             state.project.blocklyState=blocklyState; state.project.program=program; saveProject();
             const code=$('#generatedCode'); if(code)code.textContent=generateCode();
@@ -662,7 +807,7 @@ function startAssignment(id){
   const a=state.assignments.find(x=>x.id===id); if(!a)return;
   state.project=freshBlankProject(a.title,a.id);
   state.project.tutorialEnabled=(a.tutorialMode||'guided')!=='checklist';
-  state.selectedComponent=null; state.currentRecord=0; state.role=state.role||'pupil';
+  state.selectedComponent=null; state.currentRecord=0; state.currentPageId=state.project.pages[0].id; state.pageHistory=[]; state.role=state.role||'pupil';
   saveProject(); state.view='builder'; state.tab='data'; render();
 }
 function showAssignmentModal(){
@@ -691,7 +836,7 @@ function showConnectModal(){
   const compatible=state.project.fields.filter(f=>c.type==='image'?f.type==='image':f.type!=='image');
   const fields=compatible.length?compatible:state.project.fields;
   const wrap=document.createElement('div');wrap.className='modal-backdrop';
-  wrap.innerHTML=`<div class="modal"><h3>🔗 Connect ${escapeHtml(c.name)} to your database</h3><p class="muted">Choose the field this component should show. I’ll create the display blocks for screen open and record navigation.</p>
+  wrap.innerHTML=`<div class="modal"><h3>🔗 Connect ${escapeHtml(c.name)} to your database</h3><p class="muted">Choose the field this component should show. I’ll create a page-open display block for the page this component is on.</p>
   <div class="field"><label>Database field</label><select id="connectField">${fields.map(f=>`<option value="${f.id}">${escapeHtml(f.name)} · ${escapeHtml(f.type)}</option>`).join('')}</select></div>
   <div class="notice">This is the guided route. You can inspect or change the blocks afterwards.</div>
   <div class="modal-actions"><button class="btn" id="cancelConnect">Cancel</button><button class="btn primary" id="makeConnection">Create connection</button></div></div>`;
@@ -700,15 +845,15 @@ function showConnectModal(){
   $('#makeConnection').onclick=()=>{connectComponent(c.id,$('#connectField').value);wrap.remove();saveProject();state.tab='blocks';render()};
 }
 function connectComponent(componentId,fieldId){
+  const c=state.project.components.find(x=>x.id===componentId);if(!c)return;
+  const pageId=c.pageId||state.project.pages[0]?.id;
   state.project.program=state.project.program.filter(b=>!(b.type==='set_field'&&b.target===componentId));
-  if(!state.project.program.some(b=>b.type==='event_open')) state.project.program.unshift({id:`b_${Date.now()}_open`,type:'event_open'});
-  const output=[]; let insertedOpen=false;
-  for(const b of state.project.program){
-    output.push(b);
-    if(b.type==='event_open'&&!insertedOpen){output.push({id:`b_${Date.now()}_${Math.random().toString(36).slice(2,5)}`,type:'set_field',target:componentId,field:fieldId});insertedOpen=true}
-    if(b.type==='next_record'||b.type==='prev_record') output.push({id:`b_${Date.now()}_${Math.random().toString(36).slice(2,5)}`,type:'set_field',target:componentId,field:fieldId});
+  let eventIndex=state.project.program.findIndex(b=>b.type==='event_open'&&(b.page||state.project.pages[0]?.id)===pageId);
+  if(eventIndex<0){
+    state.project.program.push({id:`b_${Date.now()}_open`,type:'event_open',page:pageId});
+    eventIndex=state.project.program.length-1;
   }
-  state.project.program=output;
+  state.project.program.splice(eventIndex+1,0,{id:`b_${Date.now()}_${Math.random().toString(36).slice(2,5)}`,type:'set_field',target:componentId,field:fieldId});
   state.project.blocklyState=null;
 }
 function connectionsFor(componentId){
@@ -722,69 +867,97 @@ function moveBlock(id,delta){
   saveProject(); render();
 }
 function checklist(){
-  const hasOpen=state.project.program.some(b=>b.type==='event_open');
-  const hasClick=state.project.program.some(b=>b.type==='event_click');
+  const hasEvent=state.project.program.some(b=>['event_open','event_click','event_list_click'].includes(b.type));
   const connected=state.project.program.some(b=>b.type==='set_field');
+  const listReady=state.project.components.some(c=>c.type==='list'&&(c.listTitleField||c.listImageField));
+  const multiPage=state.project.pages.length>=2;
   return [
     {label:'Data',ok:state.project.records.length>=3&&state.project.fields.length>=3},
     {label:'Design',ok:state.project.components.length>=3},
-    {label:'Events',ok:hasOpen||hasClick},
+    {label:'Pages/List',ok:multiPage&&listReady},
+    {label:'Events',ok:hasEvent},
     {label:'Connected',ok:connected}
   ];
 }
 function checklistBadges(){return checklist().map(x=>`<span class="tag ${x.ok?'tag-good':''}">${x.ok?'✓':'○'} ${x.label}</span>`).join('')}
 function projectProgress(){const c=checklist();return Math.round(c.filter(x=>x.ok).length/c.length*100)}
 
-function startTest(withRender=true){state.currentRecord=0;state.testLogs=[];state.tutorialTested=true;log('Screen1 opened','good');runEvent('open');if(withRender)render()}
+function startTest(withRender=true){
+  state.currentRecord=0;state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.testLogs=[];state.tutorialTested=true;
+  log(`${pageName(state.currentPageId)} opened`,'good');runEvent('open',null,{pageId:state.currentPageId});if(withRender)render()
+}
 function bindTest(){
   $('[data-action="restart-test"]').onclick=()=>startTest(true);
-  $$('.screen-component[data-test-component] button').forEach(btn=>btn.onclick=()=>{const id=btn.closest('[data-test-component]').dataset.testComponent;log(`${nameOfComponent(id)} clicked`,'good');runEvent('click',id);render()});
+  $$('.screen-component[data-test-component] button').forEach(btn=>btn.onclick=()=>{
+    const id=btn.closest('[data-test-component]').dataset.testComponent;log(`${nameOfComponent(id)} clicked`,'good');runEvent('click',id,{pageId:state.currentPageId});render()
+  });
+  $$('.screen-component[data-test-component] [data-list-index]').forEach(row=>row.onclick=()=>{
+    const host=row.closest('[data-test-component]'),id=host?.dataset.testComponent,index=Number(row.dataset.listIndex);if(!id||Number.isNaN(index))return;
+    state.currentRecord=index;log(`${nameOfComponent(id)} row ${index+1} tapped → current record ${index+1}`,'good');
+    runEvent('list_click',id,{pageId:state.currentPageId,index});
+    render();
+  });
 }
-function runEvent(kind,component=null){
+function navigateTest(pageId,push=true){
+  if(!state.project.pages.some(p=>p.id===pageId)||pageId===state.currentPageId)return;
+  if(push&&state.currentPageId)state.pageHistory.push(state.currentPageId);
+  state.currentPageId=pageId;state.selectedComponent=null;log(`${pageName(pageId)} opened`,'good');runEvent('open',null,{pageId});
+}
+function goBackTest(){const prev=state.pageHistory.pop();if(prev)navigateTest(prev,false);}
+function runEvent(kind,component=null,meta={}){
   let active=false;
   for(const b of state.project.program){
-    if(b.type==='event_open'){active=kind==='open';continue}
+    if(b.type==='event_open'){active=kind==='open'&&(b.page||state.project.pages[0]?.id)===(meta.pageId||state.currentPageId);continue}
     if(b.type==='event_click'){active=kind==='click'&&b.component===component;continue}
+    if(b.type==='event_list_click'){active=kind==='list_click'&&b.component===component;continue}
     if(!active)continue;
     if(b.type==='first_record'){state.currentRecord=0;log('Moved to first record','good')}
     if(b.type==='next_record'){if(state.project.records.length){state.currentRecord=(state.currentRecord+1)%state.project.records.length;log(`Moved to record ${state.currentRecord+1}`,'good')}}
     if(b.type==='prev_record'){if(state.project.records.length){state.currentRecord=(state.currentRecord-1+state.project.records.length)%state.project.records.length;log(`Moved to record ${state.currentRecord+1}`,'good')}}
-    if(b.type==='set_field') applyField(b.target,b.field);
-    if(b.type==='set_text') applyText(b.target,b.text);
+    if(b.type==='set_field')applyField(b.target,b.field);
+    if(b.type==='set_text')applyText(b.target,b.text);
+    if(b.type==='navigate_page')navigateTest(b.page,true);
+    if(b.type==='go_back')goBackTest();
   }
 }
 function applyField(targetId,fieldId){
   const c=state.project.components.find(x=>x.id===targetId), f=state.project.fields.find(x=>x.id===fieldId), r=state.project.records[state.currentRecord];
   if(!c||!f||!r){log('A block is missing a component or field.','warn');return}
   const value=r[fieldId]??'';
-  if(c.type==='image') c.src=String(value); else if(c.type==='list'){} else c.text=String(value);
+  if(c.type==='image') c.src=String(value); else if(c.type!=='list') c.text=String(value);
   log(`${c.name} ← ${f.name} from current record`,'good');
 }
-function applyText(targetId,text){const c=state.project.components.find(x=>x.id===targetId);if(!c){log('A text block is missing its component.','warn');return}if(c.type!=='image')c.text=String(text||'');log(`${c.name} text updated`,'good')}
+function applyText(targetId,text){const c=state.project.components.find(x=>x.id===targetId);if(!c){log('A text block is missing its component.','warn');return}if(c.type!=='image'&&c.type!=='list')c.text=String(text||'');log(`${c.name} text updated`,'good')}
 function log(text,kind=''){state.testLogs.push({text,kind});if(state.testLogs.length>18)state.testLogs.shift()}
 
 function generateCode(){
   if(state.codeMode==='plain'){
     return state.project.program.map(b=>{
-      if(b.type==='event_open')return 'WHEN the screen opens:';
+      if(b.type==='event_open')return `WHEN ${pageName(b.page||state.project.pages[0]?.id)} opens:`;
       if(b.type==='event_click')return `WHEN ${nameOfComponent(b.component)} is clicked:`;
+      if(b.type==='event_list_click')return `WHEN an item in ${nameOfComponent(b.component)} is tapped:  (that row becomes the current record)`;
       if(b.type==='first_record')return '    Move to the first database record';
       if(b.type==='next_record')return '    Move to the next database record';
       if(b.type==='prev_record')return '    Move to the previous database record';
       if(b.type==='set_field')return `    Put ${nameOfField(b.field)} into ${nameOfComponent(b.target)}`;
       if(b.type==='set_text')return `    Set ${nameOfComponent(b.target)} text to \"${b.text||''}\"`;
+      if(b.type==='navigate_page')return `    Go to ${pageName(b.page)}`;
+      if(b.type==='go_back')return '    Go back to the previous page';
       return '';
-    }).join('\n');
+    }).filter(Boolean).join('\n');
   }
-  let out=[];
+  const out=[];
   state.project.program.forEach(b=>{
-    if(b.type==='event_open') out.push('def screen_opened():');
-    if(b.type==='event_click') out.push(`\ndef ${safeName(nameOfComponent(b.component))}_clicked():`);
-    if(b.type==='first_record') out.push('    record = database.first_record()');
-    if(b.type==='next_record') out.push('    record = database.next_record()');
-    if(b.type==='prev_record') out.push('    record = database.previous_record()');
-    if(b.type==='set_field') out.push(`    ${safeName(nameOfComponent(b.target))}.value = record["${nameOfField(b.field)}"]`);
-    if(b.type==='set_text') out.push(`    ${safeName(nameOfComponent(b.target))}.value = ${JSON.stringify(b.text||'')}`);
+    if(b.type==='event_open')out.push(`def ${safeName(pageName(b.page||state.project.pages[0]?.id))}_opened():`);
+    if(b.type==='event_click')out.push(`\ndef ${safeName(nameOfComponent(b.component))}_clicked():`);
+    if(b.type==='event_list_click')out.push(`\ndef ${safeName(nameOfComponent(b.component))}_item_tapped(clicked_record):\n    record = clicked_record`);
+    if(b.type==='first_record')out.push('    record = database.first_record()');
+    if(b.type==='next_record')out.push('    record = database.next_record()');
+    if(b.type==='prev_record')out.push('    record = database.previous_record()');
+    if(b.type==='set_field')out.push(`    ${safeName(nameOfComponent(b.target))}.value = record["${nameOfField(b.field)}"]`);
+    if(b.type==='set_text')out.push(`    ${safeName(nameOfComponent(b.target))}.value = ${JSON.stringify(b.text||'')}`);
+    if(b.type==='navigate_page')out.push(`    app.go_to("${pageName(b.page)}")`);
+    if(b.type==='go_back')out.push('    app.go_back()');
   });
   return out.join('\n')||'# Add some blocks to see the code idea here.';
 }
@@ -854,9 +1027,9 @@ async function loadSelectedClassData(doRender=true){
         const p=usableProjects[0];
         const clean=clone(p); delete clean.cloudId; delete clean.ownerUid; delete clean.ownerName; delete clean.classId; delete clean.updatedAt; delete clean.projectId;
         if(clean.tutorialEnabled===undefined)clean.tutorialEnabled=true;
-        state.project=clean; localStorage.setItem('dataapp_project',JSON.stringify(state.project));
+        state.project=normaliseProject(clean); state.currentPageId=state.project.pages[0]?.id||'screen1'; state.pageHistory=[]; localStorage.setItem('dataapp_project',JSON.stringify(state.project));
       }else{
-        state.project=freshBlankProject();
+        state.project=freshBlankProject(); state.currentPageId=state.project.pages[0].id; state.pageHistory=[];
         localStorage.setItem('dataapp_project',JSON.stringify(state.project));
       }
     }
@@ -908,7 +1081,7 @@ function friendlyFirebaseError(err){
   const code=err?.code||'';
   if(code.includes('popup-closed'))return 'The Google sign-in window was closed before sign-in finished.';
   if(code.includes('popup-blocked'))return 'Your browser blocked the Google sign-in window. Allow pop-ups for this site and try again.';
-  if(code.includes('permission-denied'))return 'Firebase blocked that action. Check that the V1.5 Firestore and Storage rules have been published.';
+  if(code.includes('permission-denied'))return 'Firebase blocked that action. Check that the current Firestore and Storage rules have been published.';
   if(code.includes('unauthorized-domain'))return 'This web address is not yet listed as an authorised Firebase Authentication domain.';
   return err?.message||'Something went wrong with Firebase.';
 }
