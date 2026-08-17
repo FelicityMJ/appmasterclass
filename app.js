@@ -1,3 +1,15 @@
+import {
+  isFirebaseEnabled, onAuthChange, signInWithGoogle, signOutUser,
+  isApprovedTeacher, ensureUserProfile, getUserProfile,
+  createClass as cloudCreateClass, listTeacherClasses, joinClassByCode,
+  listPupilClasses, getClass as cloudGetClass, listClassMembers,
+  removeClassMember, regenerateJoinCode, saveAssignment as cloudSaveAssignment,
+  listAssignments as cloudListAssignments, saveProjectToCloud,
+  listMyProjects, listClassProjects, listPersonalImages,
+  uploadPersonalImage, deletePersonalImage, listSharedImages,
+  uploadSharedImage, deleteSharedImage, uploadAppIcon
+} from './firebase-service.js';
+
 const $ = (sel, root=document) => root.querySelector(sel);
 const $$ = (sel, root=document) => [...root.querySelectorAll(sel)];
 const clone = (obj) => JSON.parse(JSON.stringify(obj));
@@ -193,6 +205,9 @@ function saveAssignments(){
   localStorage.setItem('dataapp_assignments',JSON.stringify(state.assignments));
 }
 
+const CLOUD_MODE = isFirebaseEnabled();
+let cloudSaveTimer = null;
+
 const state = {
   view:'landing',
   role:null,
@@ -202,9 +217,21 @@ const state = {
   currentRecord:0,
   codeMode:'python',
   device:'phone',
-  assignments:loadAssignments(),
+  assignments:CLOUD_MODE?[]:loadAssignments(),
   media:loadMediaStore(),
-  testLogs:[]
+  testLogs:[],
+  authLoading:CLOUD_MODE,
+  user:null,
+  profile:null,
+  teacherApproved:false,
+  classes:[],
+  currentClassId:localStorage.getItem('dataapp_current_class')||'',
+  currentClass:null,
+  members:[],
+  classProjects:[],
+  cloudProjects:[],
+  cloudStatus:CLOUD_MODE?'Waiting for sign-in':'Local preview mode',
+  authError:''
 };
 
 function loadProject(){
@@ -213,7 +240,24 @@ function loadProject(){
 }
 function saveProject(){
   localStorage.setItem('dataapp_project',JSON.stringify(state.project));
-  const el=$('.save-state'); if(el){el.textContent='✓ Saved'; setTimeout(()=>{if($('.save-state')) $('.save-state').textContent='Saved locally';},800)}
+  const el=$('.save-state');
+  if(el) el.textContent=CLOUD_MODE&&state.user&&state.role==='pupil'&&state.currentClassId?'Saving…':'✓ Saved locally';
+  if(CLOUD_MODE&&state.user&&state.role==='pupil'&&state.currentClassId){
+    clearTimeout(cloudSaveTimer);
+    cloudSaveTimer=setTimeout(async()=>{
+      try{
+        await saveProjectToCloud(state.project,state.user,state.currentClassId);
+        state.cloudStatus='Saved to Firebase';
+        const target=$('.save-state'); if(target) target.textContent='✓ Saved to cloud';
+      }catch(err){
+        state.cloudStatus=err.message;
+        const target=$('.save-state'); if(target) target.textContent='⚠ Save failed';
+        console.error(err);
+      }
+    },700);
+  }else if(el){
+    setTimeout(()=>{const target=$('.save-state');if(target)target.textContent='Saved locally';},800);
+  }
 }
 
 function render(){
@@ -226,53 +270,91 @@ function render(){
   if(state.view==='builder') bindBuilder();
 }
 
-function landingView(){return `
+function landingView(){
+  if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
+  if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.3</span></div>
+    <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this account is not yet on the teacher allow-list.</p>
+    <div class="notice"><b>Your Firebase UID</b><div class="uid-box">${escapeHtml(state.user.uid)}</div></div>
+    <p class="muted">In Firestore create <b>teacherAllowlist → ${escapeHtml(state.user.uid)}</b> with the field <b>enabled = true</b>, then click Check again.</p>
+    <div class="modal-actions"><button class="btn" data-action="home">Sign out</button><button class="btn primary" data-action="check-teacher">Check again</button></div>
+  </div></div>`;
+  return `
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.2 prototype</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.3 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
-      <p>A pupil-friendly app studio for classrooms: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
-      <div class="project-meta" style="margin-top:22px"><span class="tag">No Airtable</span><span class="tag">No API keys for pupils</span><span class="tag">Visual programming</span><span class="tag">Teacher classrooms</span></div>
+      <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
+      <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
     </div>
     <div class="hero-card">
-      <h2 style="margin-top:0">Try the classroom</h2>
-      <p class="muted" style="font-size:14px">For this prototype, choose a demo role. Firebase sign-in can be connected next.</p>
+      <h2 style="margin-top:0">${CLOUD_MODE?'Sign in to your classroom':'Firebase is not linked yet'}</h2>
+      <p class="muted" style="font-size:14px">${CLOUD_MODE?'Use your Google account. Pupils are created automatically; teacher accounts must be approved in Firestore.':'You can still preview the interface locally. Follow SETUP-FIREBASE.md to turn on real accounts and classrooms.'}</p>
+      ${state.authError?`<div class="notice warning">${escapeHtml(state.authError)}</div>`:''}
       <div class="role-grid">
-        <button class="role-card" data-role="pupil"><div class="role-icon">🧑‍🎓</div><div><strong>I'm a pupil</strong><span>Open a project and build an app.</span></div></button>
-        <button class="role-card" data-role="teacher"><div class="role-icon">🧑‍🏫</div><div><strong>I'm a teacher</strong><span>See classrooms, projects and progress.</span></div></button>
+        <button class="role-card" ${CLOUD_MODE?'data-auth-role="pupil"':'data-role="pupil"'}><div class="role-icon">🧑‍🎓</div><div><strong>${CLOUD_MODE?'Pupil — Continue with Google':"Pupil preview"}</strong><span>${CLOUD_MODE?'Join a class and build your apps.':'Test the pupil builder locally.'}</span></div></button>
+        <button class="role-card" ${CLOUD_MODE?'data-auth-role="teacher"':'data-role="teacher"'}><div class="role-icon">🧑‍🏫</div><div><strong>${CLOUD_MODE?'Teacher — Continue with Google':"Teacher preview"}</strong><span>${CLOUD_MODE?'Create classes, assignments and shared images.':'Test the teacher screens locally.'}</span></div></button>
       </div>
     </div>
   </div>
-</div>`}
+</div>`;
+}
 
-function topbar(label){return `<div class="topbar"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><div class="top-actions"><span class="pill">${label}</span><button class="btn small" data-action="home">Sign out</button></div></div>`}
-function pupilView(){return `<div class="shell">${topbar('Pupil demo')}<main class="page">
-<div class="welcome"><div><h1>Hi Sophie 👋</h1><p>Choose an assignment or continue your current project.</p></div><button class="btn primary" data-action="open-builder">Open current project</button></div>
-<div class="cards" style="margin-bottom:16px">
-  <div class="card project-card">
-    <div><div class="tag" style="display:inline-block;margin-bottom:8px">CURRENT PROJECT</div><h3>${escapeHtml(state.project.name)}</h3><p class="muted">${escapeHtml(state.project.tableName)} database · ${state.project.records.length} records · ${state.project.components.length} components</p></div>
-    <div class="progress"><span style="width:${projectProgress()}%"></span></div>
-    <div class="project-meta">${checklistBadges()}</div>
-    <button class="btn primary" data-action="open-builder">Continue building →</button>
-  </div>
-  <div class="card"><h3>What you are learning</h3><p class="muted">Fields, records, data types, events and connecting data to an interface.</p><div class="notice">💡 Use <b>Connect Data</b> if you need a guided way to link a database field to a screen component.</div></div>
-</div>
-<div class="section-head"><div><h2 style="font-size:20px">Assignments from your teacher</h2><p>Starting one makes a fresh project from the teacher's template.</p></div></div>
-<div class="cards">${state.assignments.map(a=>assignmentCard(a)).join('')}</div>
-</main></div>`}
-function teacherView(){return `<div class="shell">${topbar('Teacher demo')}<main class="page">
-<div class="welcome"><div><h1>Your classroom</h1><p>S2 Computing 2.4 · demo classroom</p></div><div><button class="btn" data-action="manage-bank">🖼 Manage Image Bank</button> <button class="btn primary" data-action="new-assignment">+ New assignment</button></div></div>
-<div class="cards" style="margin-bottom:16px"><div class="card"><div class="muted">Class code</div><h2 style="margin:5px 0">MAPLE-42</h2><div class="tag">Google sign-in comes with Firebase stage</div></div><div class="card"><div class="muted">Assignments</div><h2 style="margin:5px 0">${state.assignments.length}</h2></div><div class="card"><div class="muted">Pupils needing help</div><h2 style="margin:5px 0">4</h2><div class="muted" style="font-size:12px">Demo progress data</div></div></div>
-<div class="cards" style="margin-bottom:16px">${state.assignments.map(a=>`<div class="card"><div class="tag">${escapeHtml(a.level)}</div><h3 style="margin-top:10px">${escapeHtml(a.title)}</h3><p class="muted">${a.requirements.records}+ records · ${a.requirements.components}+ components · ${a.requirements.blocks}+ blocks</p><button class="btn small" data-start-assignment="${a.id}">Preview starter</button></div>`).join('')}</div>
-<div class="card"><div class="section-head"><div><h2 style="font-size:19px">Live project view</h2><p>Prototype teacher overview — real-time data will come from Firestore.</p></div><button class="btn small" data-action="open-builder">Open Sophie's project</button></div>
-<table class="class-table"><thead><tr><th>Pupil</th><th>Working on</th><th>Data</th><th>Design</th><th>Blocks</th><th>Status</th></tr></thead><tbody>
-<tr><td>Sophie M.</td><td>${escapeHtml(state.project.name)}</td><td>✓</td><td>${state.project.components.length} items</td><td>${state.project.program.length} blocks</td><td><span class="status-dot good"></span>Working</td></tr>
-<tr><td>Jack R.</td><td>Animal Facts</td><td>✓</td><td>✓</td><td>5 blocks</td><td><span class="status-dot warn"></span>Needs help</td></tr>
-<tr><td>Lucy K.</td><td>Music Guide</td><td>✓</td><td>In progress</td><td>—</td><td><span class="status-dot muted"></span>Designing</td></tr>
-<tr><td>Ben T.</td><td>Film Finder</td><td>✓</td><td>✓</td><td>8 blocks</td><td><span class="status-dot warn"></span>2 block warnings</td></tr>
-</tbody></table></div>
-</main></div>`}
+function topbar(label){
+  const person=state.user?`<span class="user-chip">${state.user.photoURL?`<img src="${escapeAttr(state.user.photoURL)}" alt="">`:''}${escapeHtml(state.user.displayName||state.user.email||'Google user')}</span>`:'';
+  return `<div class="topbar"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><div class="top-actions">${person}<span class="pill">${escapeHtml(label)}</span><button class="btn small" data-action="home">${CLOUD_MODE?'Sign out':'Exit preview'}</button></div></div>`;
+}
+
+function classSwitcher(){
+  if(!state.classes.length) return '';
+  return `<div class="class-switcher">${state.classes.map(c=>`<button class="class-chip ${c.id===state.currentClassId?'active':''}" data-select-class="${escapeAttr(c.id)}">${escapeHtml(c.name||c.className||'Class')}</button>`).join('')}</div>`;
+}
+
+function pupilView(){
+  const name=state.user?.displayName?.split(' ')[0]||'Pupil';
+  if(CLOUD_MODE && !state.classes.length) return `<div class="shell">${topbar('Pupil')}<main class="page">
+    <div class="welcome"><div><h1>Hi ${escapeHtml(name)} 👋</h1><p>Your Google account is ready. Join your first classroom to get assignments and cloud project saving.</p></div><button class="btn primary" data-action="join-class">+ Join a class</button></div>
+    <div class="card empty-class-card"><div class="big-emoji">🏫</div><h2>Enter the class code from your teacher</h2><p class="muted">You only need to join once. The class will appear here every time you sign in.</p><button class="btn primary" data-action="join-class">Join class</button></div>
+  </main></div>`;
+  const cls=state.currentClass;
+  return `<div class="shell">${topbar(CLOUD_MODE?'Pupil':'Pupil preview')}<main class="page">
+    <div class="welcome"><div><h1>Hi ${escapeHtml(name)} 👋</h1><p>${cls?`You are working in <b>${escapeHtml(cls.name||cls.className||'your class')}</b>.`:'Choose an assignment or continue your project.'}</p></div><div><button class="btn" data-action="join-class">+ Join another class</button> <button class="btn primary" data-action="open-builder">Open current project</button></div></div>
+    ${classSwitcher()}
+    <div class="cards" style="margin-bottom:16px">
+      <div class="card project-card"><div><div class="tag" style="display:inline-block;margin-bottom:8px">CURRENT PROJECT</div><h3>${escapeHtml(state.project.name)}</h3><p class="muted">${escapeHtml(state.project.tableName)} database · ${state.project.records.length} records · ${state.project.components.length} components</p></div><div class="progress"><span style="width:${projectProgress()}%"></span></div><div class="project-meta">${checklistBadges()}</div><button class="btn primary" data-action="open-builder">Continue building →</button></div>
+      <div class="card"><h3>Cloud classroom</h3><p class="muted">${CLOUD_MODE?'Your work saves to Firebase while you build. Your personal images follow your Google account between devices.':'Local preview mode.'}</p><div class="notice">🖼 <b>${personalImageCount()}/20</b> personal images used. Shared teacher images do not count.</div></div>
+    </div>
+    <div class="section-head"><div><h2 style="font-size:20px">Assignments from your teacher</h2><p>${state.assignments.length?'Choose one to start a fresh project.':'Your teacher has not added an assignment to this class yet.'}</p></div></div>
+    <div class="cards">${state.assignments.length?state.assignments.map(a=>assignmentCard(a)).join(''):'<div class="card"><div class="empty-note">No assignments yet.</div></div>'}</div>
+  </main></div>`;
+}
+
+function teacherView(){
+  if(!state.classes.length) return `<div class="shell">${topbar(CLOUD_MODE?'Teacher':'Teacher preview')}<main class="page">
+    <div class="welcome"><div><h1>Your classrooms</h1><p>Create your first class. A join code will be generated automatically.</p></div><div><button class="btn" data-action="manage-bank">🖼 Manage Image Bank</button> <button class="btn primary" data-action="create-class">+ Create class</button></div></div>
+    <div class="card empty-class-card"><div class="big-emoji">🏫</div><h2>No classes yet</h2><p class="muted">Create a class, give pupils the six-character code, and they can join with Google sign-in.</p><button class="btn primary" data-action="create-class">Create my first class</button></div>
+  </main></div>`;
+  const cls=state.currentClass||state.classes.find(c=>c.id===state.currentClassId)||state.classes[0];
+  const projectByUid=new Map(); state.classProjects.forEach(p=>{const old=projectByUid.get(p.ownerUid);if(!old)projectByUid.set(p.ownerUid,p)});
+  return `<div class="shell">${topbar(CLOUD_MODE?'Teacher':'Teacher preview')}<main class="page">
+    <div class="welcome"><div><h1>Your classrooms</h1><p>${escapeHtml(cls?.name||'Class')} · ${state.members.length} pupil${state.members.length===1?'':'s'}</p></div><div><button class="btn" data-action="manage-bank">🖼 Manage Image Bank</button> <button class="btn" data-action="create-class">+ Create class</button> <button class="btn primary" data-action="new-assignment">+ New assignment</button></div></div>
+    ${classSwitcher()}
+    <div class="cards" style="margin-bottom:16px">
+      <div class="card"><div class="muted">Class code</div><h2 class="join-code">${escapeHtml(cls?.joinCode||'—')}</h2><button class="btn small" data-action="regenerate-code">Regenerate code</button></div>
+      <div class="card"><div class="muted">Assignments</div><h2 style="margin:5px 0">${state.assignments.length}</h2><div class="muted">Saved to this class</div></div>
+      <div class="card"><div class="muted">Shared Image Bank</div><h2 style="margin:5px 0">${state.media.shared.filter(x=>!x.locked).length}</h2><button class="btn small" data-action="manage-bank">Add images</button></div>
+    </div>
+    <div class="section-head"><div><h2 style="font-size:19px">Assignments</h2><p>These appear automatically on pupils' dashboards.</p></div></div>
+    <div class="cards" style="margin-bottom:16px">${state.assignments.length?state.assignments.map(a=>`<div class="card"><div class="tag">${escapeHtml(a.level||'Guided')}</div><h3>${escapeHtml(a.title)}</h3><p class="muted">${a.requirements?.records||1}+ records · ${a.requirements?.components||4}+ components · ${a.requirements?.blocks||4}+ blocks</p><button class="btn small" data-start-assignment="${escapeAttr(a.id)}">Preview starter</button></div>`).join(''):'<div class="card"><div class="empty-note">No assignments yet. Click + New assignment.</div></div>'}</div>
+    <div class="card"><div class="section-head"><div><h2 style="font-size:19px">Pupils & projects</h2><p>Real members and saved projects from Firestore.</p></div></div>
+      <table class="class-table"><thead><tr><th>Pupil</th><th>Email</th><th>Latest project</th><th>Data</th><th>Design</th><th>Blocks</th><th></th></tr></thead><tbody>
+      ${state.members.length?state.members.map(m=>{const p=projectByUid.get(m.uid||m.id);return `<tr><td>${escapeHtml(m.displayName||'Pupil')}</td><td>${escapeHtml(m.email||'')}</td><td>${escapeHtml(p?.name||'Not started')}</td><td>${p?p.records?.length||0:'—'}</td><td>${p?p.components?.length||0:'—'}</td><td>${p?p.program?.length||0:'—'}</td><td><button class="btn small" data-remove-member="${escapeAttr(m.uid||m.id)}">Remove</button></td></tr>`}).join(''):'<tr><td colspan="7"><div class="empty-note">No pupils have joined yet. Give them class code <b>'+escapeHtml(cls?.joinCode||'')+'</b>.</div></td></tr>'}
+      </tbody></table>
+    </div>
+  </main></div>`;
+}
+
 function builderView(){return `<div class="builder">
 <div class="builder-head"><button class="btn small" data-action="back-pupil">← Dashboard</button><div class="project-title">${escapeHtml(state.project.name)}</div><span class="mini-progress">${projectProgress()}% ready</span><span class="save-state">Saved locally</span><button class="btn small" data-action="reset">Reset project</button></div>
 <div class="step-tabs">${['data','design','blocks','test','publish'].map((t,i)=>`<button class="step-tab ${state.tab===t?'active':''}" data-tab="${t}">${['1. 🗃 DATA','2. 🎨 DESIGN','3. 🧩 BLOCKS','4. ▶ TEST','5. 🚀 PUBLISH'][i]}</button>`).join('')}</div>
@@ -368,17 +450,40 @@ function bindPublish(){
   const pub=state.project.publish||(state.project.publish={appName:state.project.name,icon:'',theme:'#5b5ce2',orientation:'portrait'});
   $('#publishName').oninput=e=>{pub.appName=e.target.value;saveProject()}; $('#publishOrientation').onchange=e=>{pub.orientation=e.target.value;saveProject();render()};
   $('[data-action="choose-app-icon"]').onclick=()=>showMediaPicker({title:'Choose an app icon',selected:pub.icon,iconMode:true,onSelect:choice=>{pub.icon=choice.ref;pub.iconData=choice.dataUrl;saveProject();render()}});
-  $('[data-action="upload-app-icon"]').onclick=()=>$('#appIconFile').click(); $('#appIconFile').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;try{const c=await compressImage(f,90*1024,512);pub.icon='';pub.iconData=c.dataUrl;saveProject();render()}catch(err){alert(err.message)}};
+  $('[data-action="upload-app-icon"]').onclick=()=>$('#appIconFile').click(); $('#appIconFile').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;try{const c=await compressImage(f,90*1024,512);pub.icon='';pub.iconData=(CLOUD_MODE&&state.user&&state.role==='pupil')?await uploadAppIcon(state.user,state.project.id,c):c.dataUrl;saveProject();render()}catch(err){alert(err.message)}};
 }
 
 function bindCommon(){
-  $$('[data-role]').forEach(b=>b.onclick=()=>{state.role=b.dataset.role;state.view=state.role==='teacher'?'teacher':'pupil';render()});
-  $$('[data-action="home"]').forEach(b=>b.onclick=()=>{state.view='landing';state.role=null;render()});
+  $$('[data-role]').forEach(b=>b.onclick=()=>{
+    state.role=b.dataset.role;
+    if(!CLOUD_MODE && !state.classes.length){
+      state.classes=[{id:'local-demo',name:'S2 Computing Demo',className:'S2 Computing Demo',joinCode:'DEMO42'}];
+      state.currentClassId='local-demo'; state.currentClass=state.classes[0];
+      if(state.role==='teacher') state.members=[{uid:'demo-sophie',displayName:'Sophie M.',email:'sophie@example.school'}];
+    }
+    state.view=state.role==='teacher'?'teacher':'pupil'; render();
+  });
+  $$('[data-auth-role]').forEach(b=>b.onclick=async()=>{
+    const role=b.dataset.authRole; state.authError='';
+    sessionStorage.setItem('dataapp_auth_intent',role); localStorage.setItem('dataapp_last_role',role);
+    b.disabled=true; b.querySelector('strong').textContent='Opening Google sign-in…';
+    try{await signInWithGoogle()}catch(err){state.authError=friendlyFirebaseError(err);render()}
+  });
+  $$('[data-action="home"]').forEach(b=>b.onclick=async()=>{
+    if(CLOUD_MODE){try{await signOutUser()}catch(err){console.error(err)}}
+    state.view='landing';state.role=null;state.user=null;state.classes=[];state.currentClass=null;render();
+  });
+  $$('[data-action="check-teacher"]').forEach(b=>b.onclick=async()=>{await finishSignedInUser(state.user,'teacher')});
   $$('[data-action="open-builder"]').forEach(b=>b.onclick=()=>{state.view='builder';state.tab='data';render()});
   $$('[data-action="back-pupil"]').forEach(b=>b.onclick=()=>{state.view=state.role==='teacher'?'teacher':'pupil';render()});
   $$('[data-start-assignment]').forEach(b=>b.onclick=()=>startAssignment(b.dataset.startAssignment));
+  $$('[data-select-class]').forEach(b=>b.onclick=()=>selectClass(b.dataset.selectClass));
+  $$('[data-action="create-class"]').forEach(b=>b.onclick=showCreateClassModal);
+  $$('[data-action="join-class"]').forEach(b=>b.onclick=showJoinClassModal);
   const newAssignment=$('[data-action="new-assignment"]'); if(newAssignment)newAssignment.onclick=showAssignmentModal;
   const manageBank=$('[data-action="manage-bank"]'); if(manageBank)manageBank.onclick=showBankManager;
+  const regen=$('[data-action="regenerate-code"]'); if(regen)regen.onclick=async()=>{if(!state.currentClassId)return;if(!confirm('Generate a new class code? The old code will stop working.'))return;try{const code=CLOUD_MODE?await regenerateJoinCode(state.currentClassId):'DEMO'+Math.floor(10+Math.random()*89);state.currentClass.joinCode=code;const c=state.classes.find(x=>x.id===state.currentClassId);if(c)c.joinCode=code;render()}catch(err){alert(err.message)}};
+  $$('[data-remove-member]').forEach(b=>b.onclick=async()=>{const uid=b.dataset.removeMember;if(!confirm('Remove this pupil from the class? Their saved project will not be deleted.'))return;try{if(CLOUD_MODE)await removeClassMember(state.currentClassId,uid);state.members=state.members.filter(m=>(m.uid||m.id)!==uid);render()}catch(err){alert(err.message)}});
 }
 function bindBuilder(){
   $$('[data-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab;if(state.tab==='test') startTest(false);render()});
@@ -409,15 +514,28 @@ function showImageModal(recordIndex,fieldId){
 async function addPersonalImage(file){
   if(personalImageCount()>=PERSONAL_IMAGE_LIMIT) throw new Error(`You have used all ${PERSONAL_IMAGE_LIMIT} personal image slots.`);
   const compressed=await compressImage(file);
+  const name=file.name.replace(/\.[^.]+$/,'');
+  if(CLOUD_MODE&&state.user){
+    const asset=await uploadPersonalImage(state.user,{name,tags:file.name,...compressed});
+    state.media.personal.push(asset);
+    state.media.personal.sort((a,b)=>a.id.localeCompare(b.id));
+    return assetRef('personal',asset.id);
+  }
   const id=`p-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
-  state.media.personal.push({id,name:file.name.replace(/\.[^.]+$/,''),category:'My Images',tags:file.name.toLowerCase(),...compressed,source:'personal',createdAt:Date.now()});
+  state.media.personal.push({id,name,category:'My Images',tags:file.name.toLowerCase(),...compressed,source:'personal',createdAt:Date.now()});
   if(!saveMediaStore()) state.media.personal.pop();
   return assetRef('personal',id);
 }
 async function addSharedImage(file){
   const compressed=await compressImage(file,100*1024,900);
+  const name=file.name.replace(/\.[^.]+$/,'');
+  if(CLOUD_MODE&&state.user){
+    const asset=await uploadSharedImage(state.user,{name,tags:file.name,category:'Teacher uploads',...compressed});
+    state.media.shared.push({...asset,locked:false});
+    return assetRef('shared',asset.id);
+  }
   const id=`t-${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
-  state.media.shared.push({id,name:file.name.replace(/\.[^.]+$/,''),category:'Teacher uploads',tags:file.name.toLowerCase(),...compressed,source:'teacher',createdAt:Date.now(),locked:false});
+  state.media.shared.push({id,name,category:'Teacher uploads',tags:file.name.toLowerCase(),...compressed,source:'teacher',createdAt:Date.now(),locked:false});
   if(!saveMediaStore()) state.media.shared.pop();
   return assetRef('shared',id);
 }
@@ -454,18 +572,18 @@ function showPersonalManager(){
   <div class="modal-actions"><button class="btn" id="donePersonal">Done</button></div></div>`;
   $('#closePersonal',wrap).onclick=$('#donePersonal',wrap).onclick=()=>{wrap.remove();render()};
   const up=$('#managerUpload',wrap), fi=$('#managerFile',wrap); if(up)up.onclick=()=>fi.click(); if(fi)fi.onchange=async()=>{if(!fi.files?.[0])return;up.disabled=true;up.textContent='Optimising…';try{await addPersonalImage(fi.files[0]);paint()}catch(err){alert(err.message);paint()}};
-  $$('[data-delete-personal]',wrap).forEach(b=>b.onclick=()=>{const id=b.dataset.deletePersonal,ref=assetRef('personal',id),uses=imageUsage(ref);if(uses&&!confirm(`This image is used ${uses} time${uses===1?'':'s'} in the current project. Delete it and remove those uses?`))return;state.media.personal=state.media.personal.filter(a=>a.id!==id);clearImageRef(ref);saveMediaStore();saveProject();paint()});
+  $$('[data-delete-personal]',wrap).forEach(b=>b.onclick=async()=>{const id=b.dataset.deletePersonal,ref=assetRef('personal',id),uses=imageUsage(ref);if(uses&&!confirm(`This image is used ${uses} time${uses===1?'':'s'} in the current project. Delete it and remove those uses?`))return;try{if(CLOUD_MODE&&state.user)await deletePersonalImage(state.user,id);state.media.personal=state.media.personal.filter(a=>a.id!==id);clearImageRef(ref);if(!CLOUD_MODE)saveMediaStore();saveProject();paint()}catch(err){alert(err.message)}});
   };document.body.appendChild(wrap);paint();
 }
 function showBankManager(){
   const wrap=document.createElement('div');wrap.className='modal-backdrop';
   const paint=()=>{wrap.innerHTML=`<div class="modal media-modal"><div class="media-modal-head"><div><h3>🏫 Shared Image Bank</h3><p class="muted">Pupils can use these without using one of their 20 personal image slots.</p></div><button class="icon-btn" id="closeBank">✕</button></div>
   <div class="media-toolbar"><button class="btn primary" id="bankUpload">+ Add images to bank</button><input id="bankFiles" type="file" accept="image/*" multiple hidden></div>
-  <div class="media-manage-grid">${state.media.shared.map(a=>`<div class="manage-image"><img src="${escapeAttr(a.dataUrl)}"><div><strong>${escapeHtml(a.name)}</strong><small>${escapeHtml(a.category||'Image')}${a.size?` · ${friendlyBytes(a.size)}`:''}</small></div>${a.locked?'<span class="tag">Built in</span>':`<button class="btn small" data-delete-shared="${a.id}">Delete</button>`}</div>`).join('')}</div>
+  <div class="media-manage-grid">${state.media.shared.map(a=>{const canDelete=!a.locked&&(!CLOUD_MODE||a.uploaderUid===state.user?.uid);return `<div class="manage-image"><img src="${escapeAttr(a.dataUrl)}"><div><strong>${escapeHtml(a.name)}</strong><small>${escapeHtml(a.category||'Image')}${a.size?` · ${friendlyBytes(a.size)}`:''}</small></div>${a.locked?'<span class="tag">Built in</span>':canDelete?`<button class="btn small" data-delete-shared="${a.id}">Delete</button>`:'<span class="tag">Shared</span>'}</div>`}).join('')}</div>
   <div class="modal-actions"><button class="btn" id="doneBank">Done</button></div></div>`;
   $('#closeBank',wrap).onclick=$('#doneBank',wrap).onclick=()=>{wrap.remove();render()};
   $('#bankUpload',wrap).onclick=()=>$('#bankFiles',wrap).click(); $('#bankFiles',wrap).onchange=async e=>{const files=[...e.target.files];for(const f of files){try{await addSharedImage(f)}catch(err){alert(`${f.name}: ${err.message}`)}}paint()};
-  $$('[data-delete-shared]',wrap).forEach(b=>b.onclick=()=>{const id=b.dataset.deleteShared,ref=assetRef('shared',id),uses=imageUsage(ref);if(uses&&!confirm(`This image is used ${uses} time${uses===1?'':'s'} in the current demo project. Delete it and remove those uses?`))return;state.media.shared=state.media.shared.filter(a=>a.id!==id);clearImageRef(ref);saveMediaStore();saveProject();paint()});
+  $$('[data-delete-shared]',wrap).forEach(b=>b.onclick=async()=>{const id=b.dataset.deleteShared,ref=assetRef('shared',id),uses=imageUsage(ref);if(uses&&!confirm(`This image is used ${uses} time${uses===1?'':'s'} in the current project. Delete it and remove those uses?`))return;try{if(CLOUD_MODE&&state.user)await deleteSharedImage(state.user,id);state.media.shared=state.media.shared.filter(a=>a.id!==id);clearImageRef(ref);if(!CLOUD_MODE)saveMediaStore();saveProject();paint()}catch(err){alert(err.message)}});
   };document.body.appendChild(wrap);paint();
 }
 
@@ -505,6 +623,7 @@ function startAssignment(id){
   state.project=clone(template);
   state.project.id=`${template.id}-${Date.now()}`;
   state.project.name=a.title;
+  state.project.assignmentId=a.id;
   state.selectedComponent=null; state.currentRecord=0; state.role=state.role||'pupil';
   saveProject(); state.view='builder'; state.tab='data'; render();
 }
@@ -518,10 +637,14 @@ function showAssignmentModal(){
   <div class="modal-actions"><button class="btn" id="cancelAssignment">Cancel</button><button class="btn primary" id="createAssignment">Create</button></div></div>`;
   document.body.appendChild(wrap);
   $('#cancelAssignment').onclick=()=>wrap.remove();
-  $('#createAssignment').onclick=()=>{
+  $('#createAssignment').onclick=async()=>{
     const title=$('#assignmentTitle').value.trim()||'New assignment';
-    state.assignments.push({id:`a-${Date.now()}`,title,template:$('#assignmentTemplate').value,level:$('#assignmentLevel').value,requirements:{records:Number($('#assignmentRecords').value)||1,components:4,blocks:4}});
-    saveAssignments(); wrap.remove(); render();
+    const assignment={id:CLOUD_MODE?'':`a-${Date.now()}`,title,template:$('#assignmentTemplate').value,level:$('#assignmentLevel').value,requirements:{records:Number($('#assignmentRecords').value)||1,components:4,blocks:4}};
+    try{
+      if(CLOUD_MODE){if(!state.currentClassId)throw new Error('Choose a class first.');assignment.id=await cloudSaveAssignment(state.currentClassId,assignment)}
+      else saveAssignments();
+      state.assignments.push(assignment); if(!CLOUD_MODE)saveAssignments(); wrap.remove(); render();
+    }catch(err){alert(err.message)}
   };
 }
 function showConnectModal(){
@@ -626,4 +749,130 @@ function cap(s){return s.charAt(0).toUpperCase()+s.slice(1)}
 function escapeHtml(s){return String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}
 function escapeAttr(s){return escapeHtml(s).replace(/'/g,'&#39;')}
 
-render();
+
+async function refreshCloudMedia(){
+  if(!CLOUD_MODE||!state.user)return;
+  try{
+    const [personal,shared]=await Promise.all([listPersonalImages(state.user),listSharedImages()]);
+    state.media={personal,shared:[...clone(defaultSharedImages),...shared.map(x=>({...x,locked:false}))]};
+  }catch(err){console.error('Image bank load failed',err)}
+}
+
+async function finishSignedInUser(user,desiredRole){
+  if(!user)return;
+  state.user=user; state.authError=''; state.authLoading=false;
+  try{
+    if(desiredRole==='teacher'){
+      const approved=await isApprovedTeacher(user); state.teacherApproved=approved;
+      if(!approved){state.role='teacher-pending';state.view='landing';render();return}
+      state.profile=await ensureUserProfile(user,'teacher');
+      state.role='teacher'; state.view='teacher'; localStorage.setItem('dataapp_last_role','teacher');
+      await loadTeacherData(); render(); return;
+    }
+    state.profile=await ensureUserProfile(user,'pupil');
+    state.role='pupil'; state.view='pupil'; localStorage.setItem('dataapp_last_role','pupil');
+    await loadPupilData(); render();
+  }catch(err){state.authError=friendlyFirebaseError(err);state.view='landing';render()}
+}
+
+async function loadTeacherData(){
+  await refreshCloudMedia();
+  state.classes=await listTeacherClasses(state.user);
+  if(!state.classes.some(c=>c.id===state.currentClassId)) state.currentClassId=state.classes[0]?.id||'';
+  if(state.currentClassId) await loadSelectedClassData(false); else {state.currentClass=null;state.assignments=[];state.members=[];state.classProjects=[]}
+}
+
+async function loadPupilData(){
+  await refreshCloudMedia();
+  state.classes=await listPupilClasses(state.user);
+  if(!state.classes.some(c=>c.id===state.currentClassId)) state.currentClassId=state.classes[0]?.id||'';
+  if(state.currentClassId) await loadSelectedClassData(false); else {state.currentClass=null;state.assignments=[];state.cloudProjects=[]}
+}
+
+async function loadSelectedClassData(doRender=true){
+  if(!state.currentClassId){if(doRender)render();return}
+  localStorage.setItem('dataapp_current_class',state.currentClassId);
+  if(CLOUD_MODE){
+    state.currentClass=await cloudGetClass(state.currentClassId);
+    if(state.role==='teacher'){
+      [state.assignments,state.members,state.classProjects]=await Promise.all([
+        cloudListAssignments(state.currentClassId),listClassMembers(state.currentClassId),listClassProjects(state.currentClassId)
+      ]);
+    }else{
+      [state.assignments,state.cloudProjects]=await Promise.all([
+        cloudListAssignments(state.currentClassId),listMyProjects(state.user,state.currentClassId)
+      ]);
+      if(state.cloudProjects.length){
+        const p=state.cloudProjects[0];
+        const clean=clone(p); delete clean.cloudId; delete clean.ownerUid; delete clean.ownerName; delete clean.classId; delete clean.updatedAt; delete clean.projectId;
+        state.project=clean; localStorage.setItem('dataapp_project',JSON.stringify(state.project));
+      }
+    }
+  }else{
+    state.currentClass=state.classes.find(c=>c.id===state.currentClassId)||null;
+  }
+  if(doRender)render();
+}
+
+async function selectClass(id){
+  state.currentClassId=id; state.currentClass=null;
+  try{await loadSelectedClassData(true)}catch(err){alert(friendlyFirebaseError(err))}
+}
+
+function showCreateClassModal(){
+  const wrap=document.createElement('div');wrap.className='modal-backdrop';
+  wrap.innerHTML=`<div class="modal"><h3>🏫 Create a class</h3><p class="muted">A six-character pupil join code will be created automatically.</p><div class="field"><label>Class name</label><input id="newClassName" placeholder="e.g. S2 Computing 2.4" maxlength="60"></div><div class="modal-actions"><button class="btn" id="cancelClass">Cancel</button><button class="btn primary" id="makeClass">Create class</button></div></div>`;
+  document.body.appendChild(wrap); $('#cancelClass').onclick=()=>wrap.remove(); $('#newClassName').focus();
+  $('#makeClass').onclick=async()=>{
+    const name=$('#newClassName').value.trim(); if(!name)return;
+    const btn=$('#makeClass');btn.disabled=true;btn.textContent='Creating…';
+    try{
+      let cls;
+      if(CLOUD_MODE) cls=await cloudCreateClass(name,state.user);
+      else cls={classId:`local-${Date.now()}`,name,code:'DEMO42'};
+      const item={id:cls.classId,name:cls.name||name,className:cls.name||name,joinCode:cls.code,teacherUid:state.user?.uid||'local'};
+      state.classes.push(item);state.currentClassId=item.id;state.currentClass=item;state.assignments=[];state.members=[];state.classProjects=[];
+      localStorage.setItem('dataapp_current_class',item.id);wrap.remove();render();
+    }catch(err){alert(friendlyFirebaseError(err));btn.disabled=false;btn.textContent='Create class'}
+  };
+}
+
+function showJoinClassModal(){
+  const wrap=document.createElement('div');wrap.className='modal-backdrop';
+  wrap.innerHTML=`<div class="modal"><h3>🏫 Join a class</h3><p class="muted">Enter the six-character code your teacher gave you.</p><div class="field"><label>Class code</label><input id="joinClassCode" class="code-input" placeholder="ABC123" maxlength="8" autocomplete="off"></div><div class="modal-actions"><button class="btn" id="cancelJoin">Cancel</button><button class="btn primary" id="joinNow">Join class</button></div></div>`;
+  document.body.appendChild(wrap);$('#cancelJoin').onclick=()=>wrap.remove();$('#joinClassCode').focus();
+  $('#joinClassCode').oninput=e=>e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'');
+  $('#joinNow').onclick=async()=>{
+    const code=$('#joinClassCode').value.trim();if(!code)return;const btn=$('#joinNow');btn.disabled=true;btn.textContent='Joining…';
+    try{
+      if(CLOUD_MODE){await joinClassByCode(code,state.user);await loadPupilData()}
+      else {const item={id:`local-${code}`,name:'Demo joined class',className:'Demo joined class',joinCode:code};state.classes.push(item);state.currentClassId=item.id;state.currentClass=item}
+      wrap.remove();render();
+    }catch(err){alert(friendlyFirebaseError(err));btn.disabled=false;btn.textContent='Join class'}
+  };
+}
+
+function friendlyFirebaseError(err){
+  const code=err?.code||'';
+  if(code.includes('popup-closed'))return 'The Google sign-in window was closed before sign-in finished.';
+  if(code.includes('popup-blocked'))return 'Your browser blocked the Google sign-in window. Allow pop-ups for this site and try again.';
+  if(code.includes('permission-denied'))return 'Firebase blocked that action. Check that the V1.3 Firestore and Storage rules have been published.';
+  if(code.includes('unauthorized-domain'))return 'This web address is not yet listed as an authorised Firebase Authentication domain.';
+  return err?.message||'Something went wrong with Firebase.';
+}
+
+async function bootstrap(){
+  render();
+  if(!CLOUD_MODE)return;
+  try{
+    await onAuthChange(async user=>{
+      state.authLoading=false;state.user=user;
+      if(!user){state.view='landing';state.role=null;state.profile=null;state.classes=[];state.currentClass=null;render();return}
+      const desired=sessionStorage.getItem('dataapp_auth_intent')||localStorage.getItem('dataapp_last_role')||'pupil';
+      sessionStorage.removeItem('dataapp_auth_intent');
+      await finishSignedInUser(user,desired);
+    });
+  }catch(err){state.authLoading=false;state.authError=friendlyFirebaseError(err);render()}
+}
+
+bootstrap();

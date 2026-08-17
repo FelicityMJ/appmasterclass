@@ -2,32 +2,44 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     function signedIn() { return request.auth != null; }
-    function isSmallImage() {
+    function approvedTeacher() {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/teacherAllowlist/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/teacherAllowlist/$(request.auth.uid)).data.enabled == true;
+    }
+    function smallImage() {
       return request.resource != null
         && request.resource.contentType.matches('image/.*')
-        && request.resource.size < 150 * 1024;
+        && request.resource.size <= 150 * 1024;
+    }
+    function validImageFile(fileName) {
+      return fileName in ['01.webp','02.webp','03.webp','04.webp','05.webp','06.webp','07.webp','08.webp','09.webp','10.webp','11.webp','12.webp','13.webp','14.webp','15.webp','16.webp','17.webp','18.webp','19.webp','20.webp'];
     }
 
-    // Optimised pupil uploads only. The 20-image quota should also be checked
-    // transactionally in Firestore / trusted server code; Storage Rules enforce
-    // ownership, file type and hard file size.
-    match /users/{uid}/images/{imageId} {
+    // Personal image storage has exactly 20 permitted filenames: 01.webp ... 20.webp.
+    match /users/{uid}/images/{fileName} {
       allow read: if signedIn() && request.auth.uid == uid;
-      allow create, update: if signedIn() && request.auth.uid == uid && isSmallImage();
-      allow delete: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && validImageFile(fileName)
+        && smallImage();
+      allow delete: if signedIn() && request.auth.uid == uid && validImageFile(fileName);
     }
 
-    // Shared bank. In production, teacher/admin permission should be represented
-    // by a trusted role/claim or a server-side write path. Pupils may read.
-    match /imageBank/{imageId} {
+    // Shared bank: readable by signed-in users, writable only by approved teachers
+    // inside their own teacher folder.
+    match /imageBank/{teacherUid}/{fileName} {
       allow read: if signedIn();
-      allow write: if false;
+      allow create, update: if approvedTeacher()
+        && request.auth.uid == teacherUid
+        && smallImage();
+      allow delete: if approvedTeacher() && request.auth.uid == teacherUid;
     }
 
-    // Published app icons are stored separately from the pupil's 20-image quota.
-    match /users/{uid}/appIcons/{projectId}/{fileName} {
-      allow read: if signedIn();
-      allow create, update: if signedIn() && request.auth.uid == uid && isSmallImage();
+    // Separate icon path, so app icons do not consume one of the pupil's 20 slots.
+    match /users/{uid}/appIcons/{projectId}/icon.webp {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid && smallImage();
       allow delete: if signedIn() && request.auth.uid == uid;
     }
   }

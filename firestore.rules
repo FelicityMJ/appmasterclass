@@ -4,62 +4,86 @@ service cloud.firestore {
     function signedIn() {
       return request.auth != null;
     }
-
+    function approvedTeacher() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/teacherAllowlist/$(request.auth.uid))
+        && get(/databases/$(database)/documents/teacherAllowlist/$(request.auth.uid)).data.enabled == true;
+    }
     function ownsClass(classId) {
       return signedIn()
         && exists(/databases/$(database)/documents/classes/$(classId))
         && get(/databases/$(database)/documents/classes/$(classId)).data.teacherUid == request.auth.uid;
     }
-
     function isClassMember(classId) {
       return signedIn()
         && exists(/databases/$(database)/documents/classes/$(classId)/members/$(request.auth.uid));
     }
+    function validImageSlot(slot) {
+      return slot in ['01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16','17','18','19','20'];
+    }
+
+    // Add teacher UIDs to this collection manually in Firebase Console.
+    // Browser users can read only their own approval record and cannot create approvals.
+    match /teacherAllowlist/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
 
     match /users/{uid} {
-      allow read: if signedIn() && request.auth.uid == uid;
-
-      // A browser user cannot grant themselves a privileged role.
-      allow create: if signedIn()
-        && request.auth.uid == uid
-        && request.resource.data.role == 'pupil';
-
-      allow update: if signedIn()
-        && request.auth.uid == uid
-        && request.resource.data.role == resource.data.role;
-
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list: if false;
+      allow create: if signedIn() && request.auth.uid == uid
+        && (
+          request.resource.data.role == 'pupil'
+          || (request.resource.data.role == 'teacher' && approvedTeacher())
+        );
+      allow update: if signedIn() && request.auth.uid == uid
+        && (
+          request.resource.data.role == resource.data.role
+          || (resource.data.role == 'pupil' && request.resource.data.role == 'teacher' && approvedTeacher())
+        );
       allow delete: if false;
 
-      match /images/{imageId} {
-        allow read, create, update, delete: if signedIn() && request.auth.uid == uid;
+      match /classes/{classId} {
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow create, update: if signedIn()
+          && request.auth.uid == uid
+          && request.resource.data.joinCode is string
+          && exists(/databases/$(database)/documents/joinCodes/$(request.resource.data.joinCode))
+          && get(/databases/$(database)/documents/joinCodes/$(request.resource.data.joinCode)).data.classId == classId;
+        allow delete: if (signedIn() && request.auth.uid == uid) || ownsClass(classId);
       }
 
-      match /appIcons/{projectId} {
-        allow read, create, update, delete: if signedIn() && request.auth.uid == uid;
+      // Exactly 20 valid document IDs exist for pupil image metadata.
+      match /images/{slot} {
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow create, update, delete: if signedIn()
+          && request.auth.uid == uid
+          && validImageSlot(slot);
       }
     }
 
     match /classes/{classId} {
-      allow create: if signedIn()
+      allow create: if approvedTeacher()
         && request.resource.data.teacherUid == request.auth.uid;
-
-      allow get, update, delete: if signedIn()
-        && resource.data.teacherUid == request.auth.uid;
-
-      // Pupils do not list the class collection. They join through a joinCodes doc.
-      allow list: if false;
+      allow get: if signedIn() && (resource.data.teacherUid == request.auth.uid || isClassMember(classId));
+      // Queries are valid only when every returned class is owned by the teacher.
+      allow list: if approvedTeacher() && resource.data.teacherUid == request.auth.uid;
+      allow update: if ownsClass(classId)
+        && request.resource.data.teacherUid == resource.data.teacherUid;
+      allow delete: if ownsClass(classId);
 
       match /members/{uid} {
-        allow read: if signedIn() && (request.auth.uid == uid || ownsClass(classId));
-
-        // A pupil may create only their own membership, and must include the valid join code.
+        allow get: if signedIn() && (request.auth.uid == uid || ownsClass(classId));
+        allow list: if ownsClass(classId);
         allow create: if signedIn()
           && request.auth.uid == uid
           && request.resource.data.joinCode is string
           && exists(/databases/$(database)/documents/joinCodes/$(request.resource.data.joinCode))
           && get(/databases/$(database)/documents/joinCodes/$(request.resource.data.joinCode)).data.classId == classId;
-
-        allow update, delete: if ownsClass(classId);
+        allow update: if ownsClass(classId);
+        allow delete: if ownsClass(classId);
       }
 
       match /assignments/{assignmentId} {
@@ -68,22 +92,31 @@ service cloud.firestore {
       }
     }
 
-    // Code is the document ID. Signed-in pupils can GET a code they already know,
-    // but cannot list all valid classroom codes.
+    // A pupil can GET only a code they already know; nobody can list all class codes.
     match /joinCodes/{code} {
       allow get: if signedIn();
       allow list: if false;
-      allow create, update: if signedIn()
+      allow create: if approvedTeacher()
         && request.resource.data.classId is string
-        && ownsClass(request.resource.data.classId);
-      allow delete: if signedIn() && ownsClass(resource.data.classId);
+        && ownsClass(request.resource.data.classId)
+        && request.resource.data.teacherUid == request.auth.uid;
+      allow update: if false;
+      allow delete: if signedIn()
+        && resource.data.classId is string
+        && ownsClass(resource.data.classId);
     }
 
-    // Metadata for the shared image bank. Production teacher/admin writes should
-    // go through a trusted admin role or server function.
+    // Shared curriculum-safe image bank. All signed-in pupils can read; approved
+    // teachers can add images and can edit/delete only their own uploads.
     match /imageBank/{imageId} {
       allow read: if signedIn();
-      allow write: if false;
+      allow create: if approvedTeacher()
+        && request.resource.data.uploaderUid == request.auth.uid;
+      allow update: if approvedTeacher()
+        && resource.data.uploaderUid == request.auth.uid
+        && request.resource.data.uploaderUid == resource.data.uploaderUid;
+      allow delete: if approvedTeacher()
+        && resource.data.uploaderUid == request.auth.uid;
     }
 
     match /projects/{projectId} {
