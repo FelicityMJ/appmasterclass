@@ -1,10 +1,18 @@
-# DataApp Studio — classroom V1.13
+# DataApp Studio — classroom V1.14
 
 A child-friendly database + app builder aimed at roughly age 12–13. V1.9 keeps the multi-app, multi-page, Blockly and Android publishing foundation and adds teacher-controlled block support so pupils can build programming themselves with tutorials.
 
 
 
 
+
+
+## New in V1.14
+
+- transparent database Lists are now genuinely frameless: no outer white border and no white row-divider lines;
+- list thumbnail images use a full-bleed `cover` crop and completely fill their circular image slot;
+- fixed an older generic List CSS rule that was adding padding to nested database-list elements in Design/Test;
+- the same transparent-list and image-crop behaviour is used in Design, Test and the published Android/PWA runtime.
 
 ## New in V1.13
 

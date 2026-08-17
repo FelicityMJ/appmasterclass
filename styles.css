@@ -131,3 +131,41 @@ button{cursor:pointer}
 .screen-component .database-list.transparent-list .data-list-row{background:transparent !important;}
 .screen-component .database-list.transparent-list .data-list-row:hover{background:rgba(255,255,255,.10) !important;}
 .prop-help{display:block;margin-top:6px;color:#778196;font-size:12px;line-height:1.35;}
+
+/* V1.14: database list cleanup — true transparency, no divider lines, full-bleed circular images. */
+.screen-component .database-list .data-list-row{
+  padding:8px 9px;
+}
+.screen-component .database-list .list-row-image{
+  padding:0;
+  border:0;
+}
+.screen-component .database-list .list-row-copy,
+.screen-component .database-list .list-row-copy strong,
+.screen-component .database-list .list-row-copy span,
+.screen-component .database-list .list-row-arrow{
+  padding:0;
+  border:0;
+}
+.screen-component .database-list .list-row-image img{
+  width:100%;
+  height:100%;
+  display:block;
+  object-fit:cover;
+  border-radius:inherit;
+}
+.screen-component .database-list.transparent-list{
+  background:transparent !important;
+  border:0 !important;
+  border-radius:0 !important;
+}
+.screen-component .database-list.transparent-list .data-list-row{
+  background:transparent !important;
+  border-bottom:0 !important;
+}
+.screen-component .database-list.transparent-list .data-list-row:hover{
+  background:rgba(255,255,255,.10) !important;
+}
+.screen-component .database-list.transparent-list .list-row-image{
+  background:transparent !important;
+}
