@@ -135,7 +135,10 @@ function normaliseProject(project){
     if(!c.pageId||!project.pages.some(p=>p.id===c.pageId))c.pageId=first;
     if(c.textColor===undefined)c.textColor=c.type==='button'?'#ffffff':'#172033';
     if(c.backgroundColor===undefined)c.backgroundColor=c.type==='button'?'#5b5ce2':c.type==='input'?'#ffffff':'';
-    if(c.type==='list')c.listTransparent=Boolean(c.listTransparent);
+    if(c.type==='list'){
+      c.listBackground=c.listBackground||(c.listTransparent?'transparent':'white');
+      c.listTransparent=c.listBackground==='transparent';
+    }
     if(c.type==='list'){
       c.listLayout=c.listLayout||'image-title-subtitle';
       c.listImageField=c.listImageField||'';
@@ -290,7 +293,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.12</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.13</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this account is not yet on the teacher allow-list.</p>
     <div class="notice"><b>Your Firebase UID</b><div class="uid-box">${escapeHtml(state.user.uid)}</div></div>
     <p class="muted">In Firestore create <b>teacherAllowlist → ${escapeHtml(state.user.uid)}</b> with the field <b>enabled = true</b>, then click Check again.</p>
@@ -300,7 +303,7 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.12 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.13 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -536,7 +539,7 @@ function listPropertiesMarkup(c){
     ${needsImage?`<div class="prop-group"><label>Image field</label><select data-list-prop="listImageField">${fieldOptionsHtml(c.listImageField,'image')}</select></div>`:''}
     ${needsTitle?`<div class="prop-group"><label>Title field</label><select data-list-prop="listTitleField">${fieldOptionsHtml(c.listTitleField,'text')}</select></div>`:''}
     ${needsSubtitle?`<div class="prop-group"><label>Subtitle field</label><select data-list-prop="listSubtitleField">${fieldOptionsHtml(c.listSubtitleField,'text')}</select></div>`:''}
-    <label class="check-row"><input type="checkbox" data-list-toggle="listTransparent" ${c.listTransparent?'checked':''}> <span><b>Transparent list background</b><small>Show the page colour behind the list and its rows.</small></span></label>
+    <div class="prop-group"><label>List background</label><select data-list-prop="listBackground"><option value="white" ${(c.listBackground||(!c.listTransparent?'white':'transparent'))==='white'?'selected':''}>White</option><option value="transparent" ${(c.listBackground||(!c.listTransparent?'white':'transparent'))==='transparent'?'selected':''}>Transparent</option></select><small class="prop-help">Transparent lets the page background show through the list and every row.</small></div>
     ${autoBlocksEnabled()?`<div class="prop-group"><label>When a row is tapped</label><select data-list-prop="navigateToPage">${pageOptionsHtml(c.navigateToPage,c.pageId)}</select></div><div class="connection-note">${c.navigateToPage?`Tap → <b>${escapeHtml(pageName(c.navigateToPage))}</b>. Auto support will add the Blockly navigation.`:'Choose a destination page and Auto support will create the list-tap blocks.'}</div>`:`<button class="btn connect" style="width:100%;margin-top:8px" data-program-component="${escapeAttr(c.id)}" data-program-kind="list">🧩 Program what happens when a row is tapped</button><div class="connection-note">The tapped row automatically becomes the <b>selected record</b>, but you must add the Blockly event and navigation yourself.</div>`}
   </div>`;
 }
@@ -569,7 +572,7 @@ function componentMarkup(c,mode){
   if(c.type==='button') inner=`<button style="background:${escapeAttr(c.backgroundColor||'#5b5ce2')};color:${escapeAttr(c.textColor||'#ffffff')}">${escapeHtml(c.text||'Button')}</button>`;
   if(c.type==='image') inner=`<img src="${escapeAttr(resolveImage(c.src))}" alt="">`;
   if(c.type==='input') inner=`<input style="background:${escapeAttr(c.backgroundColor||'#ffffff')};color:${textColor}" placeholder="${escapeAttr(c.text||'Type here...')}">`;
-  if(c.type==='list') inner=`<div class="listbox database-list ${c.listTransparent?'transparent-list':''}">${listRowsMarkup(c,mode)}</div>`;
+  if(c.type==='list'){const transparent=(c.listBackground==='transparent'||c.listTransparent===true);inner=`<div class="listbox database-list ${transparent?'transparent-list':''}" style="${transparent?'background:transparent;':''}">${listRowsMarkup(c,mode)}</div>`;}
   const handles=mode==='design'&&sel?['nw','ne','sw','se'].map(pos=>`<span class="resize-handle resize-${pos}" data-resize-handle="${pos}" title="Drag to resize"></span>`).join(''):'';
   const moveHandle=mode==='design'&&sel?`<span class="move-handle" data-move-handle title="Drag to move">✥</span>`:'';
   return `<div class="screen-component ${sel}" ${attrs} style="${style}">${inner}${moveHandle}${handles}</div>`;
@@ -885,7 +888,7 @@ function bindDesign(){
   };
   $$('[data-add-component]').forEach(b=>b.onclick=()=>{
     const type=b.dataset.addComponent;const n=state.project.components.filter(c=>c.type===type).length+1;
-    const c={id:`${type}_${Date.now()}`,type,name:`${cap(type)}${n}`,pageId:state.currentPageId,x:30,y:75+(n*18),w:type==='image'?220:type==='list'?280:200,h:type==='image'?150:type==='label'?44:type==='list'?330:44,text:type==='button'?'Button':type==='input'?'Type here...':type==='label'?'New label':'',fontSize:18,align:'center',textColor:type==='button'?'#ffffff':'#172033',backgroundColor:type==='button'?'#5b5ce2':type==='input'?'#ffffff':'',src:type==='image'?imageSvg('🖼️','Your image'):'',listLayout:'image-title-subtitle',listImageField:'',listTitleField:'',listSubtitleField:'',listTransparent:false,navigateToPage:''};
+    const c={id:`${type}_${Date.now()}`,type,name:`${cap(type)}${n}`,pageId:state.currentPageId,x:30,y:75+(n*18),w:type==='image'?220:type==='list'?280:200,h:type==='image'?150:type==='label'?44:type==='list'?330:44,text:type==='button'?'Button':type==='input'?'Type here...':type==='label'?'New label':'',fontSize:18,align:'center',textColor:type==='button'?'#ffffff':'#172033',backgroundColor:type==='button'?'#5b5ce2':type==='input'?'#ffffff':'',src:type==='image'?imageSvg('🖼️','Your image'):'',listLayout:'image-title-subtitle',listImageField:'',listTitleField:'',listSubtitleField:'',listBackground:'white',listTransparent:false,navigateToPage:''};
     state.project.components.push(c);state.selectedComponent=c.id;saveProject();render()
   });
   $$('.screen-component[data-component]').forEach(el=>{
@@ -921,6 +924,7 @@ function bindDesign(){
   $$('[data-list-prop]').forEach(inp=>inp.onchange=()=>{
     const c=state.project.components.find(x=>x.id===state.selectedComponent);if(!c||c.type!=='list')return;
     c[inp.dataset.listProp]=inp.value;
+    if(inp.dataset.listProp==='listBackground')c.listTransparent=inp.value==='transparent';
     if(inp.dataset.listProp==='navigateToPage')connectListNavigation(c);
     saveProject();render();
   });

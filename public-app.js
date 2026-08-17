@@ -187,7 +187,10 @@ function componentMarkup(component) {
   }
   if (component.type === 'image') inner = `<img src="${attr(component.src || '')}" alt="">`;
   if (component.type === 'input') inner = `<input style="background:${attr(component.backgroundColor || '#ffffff')};color:${textColour}" placeholder="${attr(component.text || 'Type here...')}">`;
-  if (component.type === 'list') inner = `<div class="listbox database-list ${component.listTransparent ? 'transparent-list' : ''}">${listRowsMarkup(component)}</div>`;
+  if (component.type === 'list') {
+    const transparent = component.listBackground === 'transparent' || component.listTransparent === true;
+    inner = `<div class="listbox database-list ${transparent ? 'transparent-list' : ''}" style="${transparent ? 'background:transparent;' : ''}">${listRowsMarkup(component)}</div>`;
+  }
   return `<div class="public-component" data-component="${attr(component.id)}" style="${style}">${inner}</div>`;
 }
 

@@ -6,3 +6,8 @@
 .public-component .database-list.transparent-list .data-list-row{background:transparent}
 .public-component .database-list.transparent-list .data-list-row:active{background:rgba(255,255,255,.12)}
 .public-component .database-list.transparent-list .list-row-image{background:rgba(255,255,255,.18)}
+
+/* V1.13: published list transparency uses the same saved component property. */
+.public-component .listbox.database-list.transparent-list,
+.public-component .database-list.transparent-list{background:transparent !important;}
+.public-component .database-list.transparent-list .data-list-row{background:transparent !important;}

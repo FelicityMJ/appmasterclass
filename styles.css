@@ -124,3 +124,10 @@ button{cursor:pointer}
 .screen-component .database-list.transparent-list .data-list-row:hover{background:rgba(255,255,255,.10)}
 .screen-component .database-list.transparent-list .list-row-image{background:rgba(255,255,255,.18)}
 .check-row small{display:block;color:var(--muted);font-weight:500;margin-top:3px}
+
+/* V1.13: one explicit list-background property shared by Design and Test. */
+.screen-component .listbox.database-list.transparent-list,
+.screen-component .database-list.transparent-list{background:transparent !important;}
+.screen-component .database-list.transparent-list .data-list-row{background:transparent !important;}
+.screen-component .database-list.transparent-list .data-list-row:hover{background:rgba(255,255,255,.10) !important;}
+.prop-help{display:block;margin-top:6px;color:#778196;font-size:12px;line-height:1.35;}
