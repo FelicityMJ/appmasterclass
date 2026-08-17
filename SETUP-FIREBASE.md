@@ -1,6 +1,6 @@
-# Connect DataApp Studio V1.9 to Firebase
+# Connect DataApp Studio V1.18 to Firebase
 
-This guide is written for the files in this ZIP. V1.9 uses the existing V1.5 publishing rules model and adds multi-page, multi-app and teacher-controlled Blockly support inside the existing classroom structure.
+This guide is written for V1.18. It includes Google sign-in, classrooms, pupil projects, Android publishing and administrator-controlled teacher invitations.
 
 ## What Firebase is doing
 
@@ -127,47 +127,54 @@ These rules:
 
 ---
 
-## 6. Make your own Google account an approved teacher
+## 6. Bootstrap the first administrator once
 
-This is intentionally a two-step process so a pupil cannot simply click "I'm a teacher" and gain teacher permissions.
+V1.18 removes the need to copy every future teacher's Firebase UID. You only bootstrap the **first administrator** manually; after that, the admin invites teachers by email from the website.
 
-### First sign in once
+### If you are upgrading an existing V1.17 site
 
-1. Run/deploy DataApp Studio with `firebaseEnabled = true`.
-2. Click **Teacher — Continue with Google**.
-3. Sign in with your Google account.
-4. The site will show **Teacher approval needed** and display your Firebase **UID**.
-5. Copy that UID.
+You already have your own document at:
 
-### Add the teacher allow-list document
+`teacherAllowlist/{YOUR_UID}`
 
-In Firebase Console:
+In **Firestore → Data**, open that document and add:
 
-1. Go to **Firestore → Data**.
-2. Start a collection named exactly:
+```text
+admin      boolean    true
+```
 
-`teacherAllowlist`
-
-3. Use your copied Firebase UID as the **Document ID**.
-4. Add a field:
+Keep your existing:
 
 ```text
 enabled    boolean    true
 ```
 
-Optional fields for your own reference can be added, for example:
+Publish the V1.18 `firestore.rules`, refresh DataApp Studio and sign in again. Your top-right role badge should say **Admin**, and the Teacher dashboard will show **Invite teacher**.
+
+### If this is a brand-new Firebase project
+
+1. Enable Google Authentication and deploy V1.18.
+2. Sign in once using **Teacher — Sign in**.
+3. In Firebase Console open **Authentication → Users** and copy your user UID.
+4. In **Firestore → Data**, create `teacherAllowlist/{YOUR_UID}` with:
 
 ```text
-name       string     Felicity
-email      string     your-email@example.com
+enabled    boolean    true
+admin      boolean    true
+email      string     your-google-email@example.com
 ```
 
-5. Save the document.
-6. Return to DataApp Studio and click **Check again**.
+5. Refresh DataApp Studio and sign in again.
 
-You should now enter the Teacher dashboard. Your teacher profile is created automatically.
+### Inviting every later teacher
 
-To approve another teacher later, add another document using that teacher's Firebase UID.
+Do **not** manually add their UID. In DataApp Studio use:
+
+**Teacher dashboard → Invite teacher**
+
+Enter the exact Google email address they will use. DataApp Studio stores a secure invitation in `teacherInvites/{email}`. The teacher then opens the site, chooses **Teacher — Sign in**, and uses that Google account. Their own `teacherAllowlist/{uid}` record is created automatically with `admin = false`.
+
+Only the administrator can create/cancel invitations or revoke teacher access. Invited teachers cannot promote themselves or invite another teacher.
 
 ---
 
@@ -335,17 +342,17 @@ imageBank
   IMAGE_ID
 ```
 
-Do **not** manually create these normal class/pupil/project collections. The website creates them. The only collection you need to seed manually is the teacher allow-list.
+Do **not** manually create the normal class/pupil/project collections. The website creates them. For V1.18 you manually bootstrap only the **first administrator** in `teacherAllowlist`; later teachers are invited from the Admin dashboard.
 
 ---
 
 ## Troubleshooting
 
 ### "Teacher approval needed"
-Your Google sign-in worked. Add the displayed UID to `teacherAllowlist` with `enabled = true`.
+Your Google sign-in worked, but the Google email has not been invited. Ask the DataApp Studio administrator to use **Invite teacher** with that exact email address, then click **Check again**.
 
 ### "Firebase blocked that action"
-Most often the V1.3 `firestore.rules` or `storage.rules` have not been published, or the teacher UID is not correctly allow-listed.
+Check that the V1.18 `firestore.rules` have been published. For teacher invitations, also check that your administrator allow-list document has both `enabled = true` and `admin = true`.
 
 ### Google says the domain is not authorised
 Add the site's hostname to Firebase Authentication's authorised domains.

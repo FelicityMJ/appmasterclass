@@ -42,11 +42,116 @@ export async function signOutUser(){
   return s.authSdk.signOut(s.auth);
 }
 
+function normaliseTeacherEmail(email){
+  return String(email||'').trim().toLowerCase();
+}
+
+export async function getTeacherAccess(user){
+  const s=await initFirebaseServices();
+  if(!s||!user) return {approved:false,admin:false};
+  const snap=await s.dbSdk.getDoc(s.dbSdk.doc(s.db,'teacherAllowlist',user.uid));
+  if(!snap.exists()) return {approved:false,admin:false};
+  const data=snap.data()||{};
+  return {approved:data.enabled !== false,admin:data.enabled !== false && data.admin === true,...data};
+}
+
 export async function isApprovedTeacher(user){
+  return (await getTeacherAccess(user)).approved;
+}
+
+export async function claimTeacherInvite(user){
   const s=await initFirebaseServices();
   if(!s||!user) return false;
-  const snap=await s.dbSdk.getDoc(s.dbSdk.doc(s.db,'teacherAllowlist',user.uid));
-  return snap.exists() && snap.data().enabled !== false;
+  const email=normaliseTeacherEmail(user.email);
+  if(!email) return false;
+  const inviteRef=s.dbSdk.doc(s.db,'teacherInvites',email);
+  const inviteSnap=await s.dbSdk.getDoc(inviteRef);
+  if(!inviteSnap.exists() || inviteSnap.data().enabled === false) return false;
+  const invite=inviteSnap.data()||{};
+  await s.dbSdk.setDoc(s.dbSdk.doc(s.db,'teacherAllowlist',user.uid),{
+    enabled:true,
+    admin:false,
+    email,
+    displayName:user.displayName||'',
+    invitedByUid:invite.invitedByUid||'',
+    invitedByName:invite.invitedByName||'',
+    approvedAt:s.dbSdk.serverTimestamp()
+  });
+  return true;
+}
+
+export async function createTeacherInvite(adminUser,email){
+  const s=await initFirebaseServices();
+  if(!s||!adminUser) throw new Error('Sign in first.');
+  const access=await getTeacherAccess(adminUser);
+  if(!access.admin) throw new Error('Only the DataApp Studio admin can invite teachers.');
+  const clean=normaliseTeacherEmail(email);
+  if(!clean || !clean.includes('@')) throw new Error('Enter the teacher\'s Google email address.');
+
+  // If this email already belongs to a previously invited teacher account, re-enable it.
+  const accounts=await listTeacherAccounts(adminUser);
+  const existing=accounts.find(a=>normaliseTeacherEmail(a.email)===clean);
+  if(existing){
+    if(existing.admin===true) throw new Error('That account is already an administrator.');
+    await s.dbSdk.updateDoc(s.dbSdk.doc(s.db,'teacherAllowlist',existing.uid),{
+      enabled:true,
+      admin:false,
+      updatedAt:s.dbSdk.serverTimestamp()
+    });
+  }
+
+  const ref=s.dbSdk.doc(s.db,'teacherInvites',clean);
+  await s.dbSdk.setDoc(ref,{
+    email:clean,
+    enabled:true,
+    invitedByUid:adminUser.uid,
+    invitedByName:adminUser.displayName||adminUser.email||'Admin',
+    createdAt:s.dbSdk.serverTimestamp(),
+    createdAtMs:Date.now(),
+    updatedAt:s.dbSdk.serverTimestamp()
+  },{merge:true});
+  return {email:clean,enabled:true};
+}
+
+export async function listTeacherInvites(adminUser){
+  const s=await initFirebaseServices();
+  if(!s||!adminUser) return [];
+  const access=await getTeacherAccess(adminUser);
+  if(!access.admin) return [];
+  const snap=await s.dbSdk.getDocs(s.dbSdk.collection(s.db,'teacherInvites'));
+  return snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>String(a.email||a.id).localeCompare(String(b.email||b.id)));
+}
+
+export async function listTeacherAccounts(adminUser){
+  const s=await initFirebaseServices();
+  if(!s||!adminUser) return [];
+  const access=await getTeacherAccess(adminUser);
+  if(!access.admin) return [];
+  const snap=await s.dbSdk.getDocs(s.dbSdk.collection(s.db,'teacherAllowlist'));
+  return snap.docs.map(d=>({uid:d.id,...d.data()}));
+}
+
+export async function revokeTeacherAccount(adminUser,uid,email=''){
+  const s=await initFirebaseServices();
+  if(!s||!adminUser) throw new Error('Sign in first.');
+  const access=await getTeacherAccess(adminUser);
+  if(!access.admin) throw new Error('Only the DataApp Studio admin can manage teachers.');
+  if(uid===adminUser.uid) throw new Error('You cannot revoke your own administrator account.');
+  const batch=s.dbSdk.writeBatch(s.db);
+  batch.set(s.dbSdk.doc(s.db,'teacherAllowlist',uid),{enabled:false,updatedAt:s.dbSdk.serverTimestamp()},{merge:true});
+  const clean=normaliseTeacherEmail(email);
+  if(clean) batch.set(s.dbSdk.doc(s.db,'teacherInvites',clean),{enabled:false,updatedAt:s.dbSdk.serverTimestamp()},{merge:true});
+  await batch.commit();
+}
+
+export async function cancelTeacherInvite(adminUser,email){
+  const s=await initFirebaseServices();
+  if(!s||!adminUser) throw new Error('Sign in first.');
+  const access=await getTeacherAccess(adminUser);
+  if(!access.admin) throw new Error('Only the DataApp Studio admin can manage teacher invitations.');
+  const clean=normaliseTeacherEmail(email);
+  if(!clean) return;
+  await s.dbSdk.setDoc(s.dbSdk.doc(s.db,'teacherInvites',clean),{enabled:false,updatedAt:s.dbSdk.serverTimestamp()},{merge:true});
 }
 
 export async function ensureUserProfile(user, role='pupil'){

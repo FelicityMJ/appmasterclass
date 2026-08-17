@@ -9,6 +9,20 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/teacherAllowlist/$(request.auth.uid))
         && get(/databases/$(database)/documents/teacherAllowlist/$(request.auth.uid)).data.enabled == true;
     }
+    function adminTeacher() {
+      return approvedTeacher()
+        && get(/databases/$(database)/documents/teacherAllowlist/$(request.auth.uid)).data.admin == true;
+    }
+    function invitedTeacherClaim(uid) {
+      return signedIn()
+        && request.auth.uid == uid
+        && request.auth.token.email is string
+        && exists(/databases/$(database)/documents/teacherInvites/$(request.auth.token.email.lower()))
+        && get(/databases/$(database)/documents/teacherInvites/$(request.auth.token.email.lower())).data.enabled == true
+        && request.resource.data.enabled == true
+        && request.resource.data.admin == false
+        && request.resource.data.email == request.auth.token.email.lower();
+    }
     function ownsClass(classId) {
       return signedIn()
         && exists(/databases/$(database)/documents/classes/$(classId))
@@ -22,12 +36,27 @@ service cloud.firestore {
       return slot in ['01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16','17','18','19','20'];
     }
 
-    // Add teacher UIDs to this collection manually in Firebase Console.
-    // Browser users can read only their own approval record and cannot create approvals.
+    // Teacher accounts. The first administrator is bootstrapped once in Firebase Console
+    // by adding admin=true to their own existing allow-list document. After that, only
+    // that admin can create invitations or revoke teacher access.
     match /teacherAllowlist/{uid} {
-      allow get: if signedIn() && request.auth.uid == uid;
-      allow list: if false;
-      allow create, update, delete: if false;
+      allow get: if signedIn() && (request.auth.uid == uid || adminTeacher());
+      allow list: if adminTeacher();
+      // An invited Google account may create only its own non-admin teacher record.
+      allow create: if invitedTeacherClaim(uid);
+      // Admins may enable/disable teacher accounts. Browser users can never self-promote.
+      allow update: if adminTeacher();
+      allow delete: if false;
+    }
+
+    // Invitations are keyed by the invited Google email address. A signed-in user can
+    // read only the invitation for their own email; only the administrator can list
+    // or change invitations.
+    match /teacherInvites/{email} {
+      allow get: if adminTeacher()
+        || (signedIn() && request.auth.token.email is string && request.auth.token.email.lower() == email);
+      allow list: if adminTeacher();
+      allow create, update, delete: if adminTeacher();
     }
 
     match /users/{uid} {

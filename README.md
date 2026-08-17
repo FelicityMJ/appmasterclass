@@ -1,14 +1,28 @@
-# DataApp Studio — classroom V1.17
+# DataApp Studio — classroom V1.18
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.17 combines multi-app classrooms, multi-page database apps, Blockly, Android publishing, differentiated programming support, teacher inspection, editable database structures and clearer new/returning pupil sign-in.
-
-
+A child-friendly database + app builder aimed at roughly age 12–13. V1.18 adds administrator-controlled teacher invitations on top of the multi-app classroom, database, Blockly and Android publishing workflow.
 
 
 
 
 
 
+
+
+
+
+## New in V1.18
+
+- one teacher account can be marked as the **DataApp Studio administrator** with `admin = true` in its existing `teacherAllowlist/{uid}` document;
+- only that administrator sees **Invite teacher** and the Teacher administration panel;
+- the admin invites a teacher by their Google email address — no Firebase UID needs to be copied;
+- the invited teacher chooses **Teacher — Sign in** and their non-admin teacher account is activated automatically on first Google sign-in;
+- invited teachers can create and manage their own classes but **cannot invite other teachers**;
+- the admin can see active teacher accounts, pending invitations, cancel a pending invite, or revoke a teacher account;
+- revoking teacher access does not delete that teacher's stored classes or pupil work;
+- invitation emails are not silently sent by Firebase: the admin can copy the prepared invitation or open their normal email app with the message ready to send.
+
+**Firestore rules change required from V1.17.** Publish the V1.18 `firestore.rules` before using teacher invitations. No Storage rules change is required.
 
 ## New in V1.17
 

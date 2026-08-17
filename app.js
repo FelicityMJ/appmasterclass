@@ -1,6 +1,8 @@
 import {
   isFirebaseEnabled, onAuthChange, signInWithGoogle, signOutUser,
-  isApprovedTeacher, ensureUserProfile, getUserProfile,
+  isApprovedTeacher, getTeacherAccess, claimTeacherInvite, createTeacherInvite,
+  listTeacherInvites, listTeacherAccounts, revokeTeacherAccount, cancelTeacherInvite,
+  ensureUserProfile, getUserProfile,
   createClass as cloudCreateClass, listTeacherClasses, joinClassByCode,
   listPupilClasses, getClass as cloudGetClass, listClassMembers, getClassMember, updateClassMemberSettings,
   removeClassMember, regenerateJoinCode, saveAssignment as cloudSaveAssignment,
@@ -242,6 +244,9 @@ const state = {
   user:null,
   profile:null,
   teacherApproved:false,
+  teacherAdmin:false,
+  teacherInvites:[],
+  teacherAccounts:[],
   classes:[],
   currentClassId:localStorage.getItem('dataapp_current_class')||'',
   currentClass:null,
@@ -301,17 +306,17 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.17</span></div>
-    <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this account is not yet on the teacher allow-list.</p>
-    <div class="notice"><b>Your Firebase UID</b><div class="uid-box">${escapeHtml(state.user.uid)}</div></div>
-    <p class="muted">In Firestore create <b>teacherAllowlist → ${escapeHtml(state.user.uid)}</b> with the field <b>enabled = true</b>, then click Check again.</p>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.18</span></div>
+    <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this Google account has not been invited as a teacher yet.</p>
+    <div class="notice"><b>Ask your DataApp Studio administrator to invite this exact Google email address.</b><div class="uid-box">${escapeHtml(state.user.email||'')}</div></div>
+    <p class="muted">Once the administrator has invited the address, click <b>Check again</b>. The teacher account will be activated automatically; no Firebase UID needs to be copied.</p>
     <div class="modal-actions"><button class="btn" data-action="home">Sign out</button><button class="btn primary" data-action="check-teacher">Check again</button></div>
   </div></div>`;
   return `
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.17 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.18 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -379,17 +384,46 @@ function projectProgressFor(project){
   const checks=[(project.records||[]).length>=3&&(project.fields||[]).length>=3,(project.components||[]).length>=3,(project.pages||[]).length>=2&&listReady,hasEvent,connected];
   return Math.round(checks.filter(Boolean).length/checks.length*100);
 }
+
+function teacherAdminPanel(){
+  if(!state.teacherAdmin)return '';
+  const activeAccounts=(state.teacherAccounts||[]).filter(a=>a.enabled!==false);
+  const activeByEmail=new Map(activeAccounts.filter(a=>a.email).map(a=>[String(a.email).toLowerCase(),a]));
+  const pending=(state.teacherInvites||[]).filter(i=>i.enabled!==false && !activeByEmail.has(String(i.email||i.id||'').toLowerCase()));
+  const accountRows=activeAccounts.length?activeAccounts.map(a=>{
+    const isMe=a.uid===state.user?.uid;
+    const label=a.admin===true?'Administrator':'Teacher';
+    const email=a.email||(isMe?state.user?.email:'');
+    const name=a.displayName||(isMe?state.user?.displayName:'')||email||'Teacher account';
+    return `<div class="teacher-admin-row"><div><strong>${escapeHtml(name)}</strong><div class="muted">${escapeHtml(email||'')} · ${label}</div></div><div>${a.admin===true?'<span class="tag tag-good">Admin</span>':`<button class="btn small danger-outline" data-revoke-teacher="${escapeAttr(a.uid)}" data-teacher-email="${escapeAttr(email||'')}">Revoke</button>`}</div></div>`;
+  }).join(''):'<div class="empty-note">No teacher accounts found.</div>';
+  const pendingRows=pending.length?pending.map(i=>{
+    const email=String(i.email||i.id||'');
+    return `<div class="teacher-admin-row"><div><strong>${escapeHtml(email)}</strong><div class="muted">Waiting for first Google sign-in</div></div><button class="btn small" data-cancel-teacher-invite="${escapeAttr(email)}">Cancel invite</button></div>`;
+  }).join(''):'<div class="empty-note">No pending invitations.</div>';
+  return `<div class="card teacher-admin-panel">
+    <div class="section-head"><div><h2 style="font-size:19px">Teacher administration</h2><p>Only your administrator account can invite or revoke teachers.</p></div><button class="btn primary" data-action="invite-teacher">+ Invite teacher</button></div>
+    <div class="teacher-admin-columns">
+      <div><h3>Teacher accounts</h3>${accountRows}</div>
+      <div><h3>Pending invitations</h3>${pendingRows}</div>
+    </div>
+  </div>`;
+}
+
 function teacherView(){
-  if(!state.classes.length) return `<div class="shell">${topbar(CLOUD_MODE?'Teacher':'Teacher preview')}<main class="page">
-    <div class="welcome"><div><h1>Your classrooms</h1><p>Create your first class. A join code will be generated automatically.</p></div><div><button class="btn" data-action="manage-bank">🖼 Manage Image Bank</button> <button class="btn primary" data-action="create-class">+ Create class</button></div></div>
+  const teacherLabel=CLOUD_MODE?(state.teacherAdmin?'Admin':'Teacher'):'Teacher preview';
+  if(!state.classes.length) return `<div class="shell">${topbar(teacherLabel)}<main class="page">
+    <div class="welcome"><div><h1>Your classrooms</h1><p>Create your first class. A join code will be generated automatically.</p></div><div>${state.teacherAdmin?'<button class="btn" data-action="invite-teacher">👩‍🏫 Invite teacher</button> ':''}<button class="btn" data-action="manage-bank">🖼 Manage Image Bank</button> <button class="btn primary" data-action="create-class">+ Create class</button></div></div>
+    ${teacherAdminPanel()}
     <div class="card empty-class-card"><div class="big-emoji">🏫</div><h2>No classes yet</h2><p class="muted">Create a class, give pupils the six-character code, and they can join with Google sign-in.</p><button class="btn primary" data-action="create-class">Create my first class</button></div>
   </main></div>`;
   const cls=state.currentClass||state.classes.find(c=>c.id===state.currentClassId)||state.classes[0];
   const projectByUid=new Map(), projectCountByUid=new Map();
   sortProjects(state.classProjects).forEach(p=>{projectCountByUid.set(p.ownerUid,(projectCountByUid.get(p.ownerUid)||0)+1);if(!projectByUid.has(p.ownerUid))projectByUid.set(p.ownerUid,p)});
-  return `<div class="shell">${topbar(CLOUD_MODE?'Teacher':'Teacher preview')}<main class="page">
-    <div class="welcome"><div><h1>Your classrooms</h1><p>${escapeHtml(cls?.name||'Class')} · ${state.members.length} pupil${state.members.length===1?'':'s'}</p></div><div><button class="btn" data-action="manage-bank">🖼 Manage Image Bank</button> <button class="btn" data-action="create-class">+ Create class</button> <button class="btn primary" data-action="new-assignment">+ New assignment</button></div></div>
+  return `<div class="shell">${topbar(teacherLabel)}<main class="page">
+    <div class="welcome"><div><h1>Your classrooms</h1><p>${escapeHtml(cls?.name||'Class')} · ${state.members.length} pupil${state.members.length===1?'':'s'}</p></div><div>${state.teacherAdmin?'<button class="btn" data-action="invite-teacher">👩‍🏫 Invite teacher</button> ':''}<button class="btn" data-action="manage-bank">🖼 Manage Image Bank</button> <button class="btn" data-action="create-class">+ Create class</button> <button class="btn primary" data-action="new-assignment">+ New assignment</button></div></div>
     ${classSwitcher()}
+    ${teacherAdminPanel()}
     <div class="cards" style="margin-bottom:16px">
       <div class="card"><div class="muted">Class code</div><h2 class="join-code">${escapeHtml(cls?.joinCode||'—')}</h2><button class="btn small" data-action="regenerate-code">Regenerate code</button></div>
       <div class="card"><div class="muted">Assignments</div><h2 style="margin:5px 0">${state.assignments.length}</h2><div class="muted">Saved to this class</div></div>
@@ -741,7 +775,7 @@ function bindCommon(){
   });
   $$('[data-action="home"]').forEach(b=>b.onclick=async()=>{
     if(CLOUD_MODE){try{await signOutUser()}catch(err){console.error(err)}}
-    state.view='landing';state.role=null;state.user=null;state.classes=[];state.currentClass=null;state.teacherInspectActive=false;state.teacherPupilUid='';render();
+    state.view='landing';state.role=null;state.user=null;state.classes=[];state.currentClass=null;state.teacherAdmin=false;state.teacherInvites=[];state.teacherAccounts=[];state.teacherInspectActive=false;state.teacherPupilUid='';render();
   });
   $$('[data-action="check-teacher"]').forEach(b=>b.onclick=async()=>{await finishSignedInUser(state.user,'teacher')});
   $$('[data-action="open-builder"]').forEach(b=>b.onclick=()=>{state.project=normaliseProject(state.project);state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.view='builder';state.tab='data';if(state.project.tutorialEnabled===undefined)state.project.tutorialEnabled=true;render()});
@@ -760,6 +794,16 @@ function bindCommon(){
   $$('[data-action="join-class"]').forEach(b=>b.onclick=showJoinClassModal);
   const newAssignment=$('[data-action="new-assignment"]'); if(newAssignment)newAssignment.onclick=showAssignmentModal;
   const manageBank=$('[data-action="manage-bank"]'); if(manageBank)manageBank.onclick=showBankManager;
+  const inviteTeacher=$('[data-action="invite-teacher"]'); if(inviteTeacher)inviteTeacher.onclick=showInviteTeacherModal;
+  $$('[data-cancel-teacher-invite]').forEach(b=>b.onclick=async()=>{
+    const email=b.dataset.cancelTeacherInvite;if(!confirm(`Cancel the invitation for ${email}?`))return;
+    try{await cancelTeacherInvite(state.user,email);await loadTeacherAdminData();render()}catch(err){alert(friendlyFirebaseError(err))}
+  });
+  $$('[data-revoke-teacher]').forEach(b=>b.onclick=async()=>{
+    const uid=b.dataset.revokeTeacher,email=b.dataset.teacherEmail||'';
+    if(!confirm(`Revoke teacher access${email?` for ${email}`:''}? Their own classes and pupil work will remain stored, but they will no longer be able to use the teacher account.`))return;
+    try{await revokeTeacherAccount(state.user,uid,email);await loadTeacherAdminData();render()}catch(err){alert(friendlyFirebaseError(err))}
+  });
   const regen=$('[data-action="regenerate-code"]'); if(regen)regen.onclick=async()=>{if(!state.currentClassId)return;if(!confirm('Generate a new class code? The old code will stop working.'))return;try{const code=CLOUD_MODE?await regenerateJoinCode(state.currentClassId):'DEMO'+Math.floor(10+Math.random()*89);state.currentClass.joinCode=code;const c=state.classes.find(x=>x.id===state.currentClassId);if(c)c.joinCode=code;render()}catch(err){alert(err.message)}};
   $$('[data-block-support]').forEach(sel=>sel.onchange=async()=>{
     const uid=sel.dataset.blockSupport,mode=sel.value==='auto'?'auto':'manual';
@@ -1330,8 +1374,13 @@ async function finishSignedInUser(user,desiredRole){
   state.user=user; state.authError=''; state.authLoading=false;
   try{
     if(desiredRole==='teacher'){
-      const approved=await isApprovedTeacher(user); state.teacherApproved=approved;
-      if(!approved){state.role='teacher-pending';state.view='landing';render();return}
+      let access=await getTeacherAccess(user);
+      if(!access.approved){
+        try{await claimTeacherInvite(user)}catch(err){if(err?.code!=='permission-denied')console.warn('Teacher invite claim failed',err)}
+        access=await getTeacherAccess(user);
+      }
+      state.teacherApproved=access.approved;state.teacherAdmin=access.admin===true;
+      if(!access.approved){state.role='teacher-pending';state.view='landing';render();return}
       state.profile=await ensureUserProfile(user,'teacher');
       state.role='teacher'; state.view='teacher'; state.teacherInspectActive=false; localStorage.setItem('dataapp_last_role','teacher');
       await loadTeacherData(); render(); return;
@@ -1347,8 +1396,20 @@ async function finishSignedInUser(user,desiredRole){
   }catch(err){state.authError=friendlyFirebaseError(err);state.view='landing';render()}
 }
 
+async function loadTeacherAdminData(){
+  if(!CLOUD_MODE||!state.user){state.teacherAdmin=false;state.teacherInvites=[];state.teacherAccounts=[];return}
+  const access=await getTeacherAccess(state.user);
+  state.teacherApproved=access.approved===true;state.teacherAdmin=access.admin===true;
+  if(state.teacherAdmin){
+    [state.teacherInvites,state.teacherAccounts]=await Promise.all([listTeacherInvites(state.user),listTeacherAccounts(state.user)]);
+  }else{
+    state.teacherInvites=[];state.teacherAccounts=[];
+  }
+}
+
 async function loadTeacherData(){
   await refreshCloudMedia();
+  await loadTeacherAdminData();
   state.classes=await listTeacherClasses(state.user);
   if(!state.classes.some(c=>c.id===state.currentClassId)) state.currentClassId=state.classes[0]?.id||'';
   if(state.currentClassId) await loadSelectedClassData(false); else {state.currentClass=null;state.assignments=[];state.members=[];state.classProjects=[]}
@@ -1393,6 +1454,32 @@ async function loadSelectedClassData(doRender=true){
 async function selectClass(id){
   state.currentClassId=id; state.currentClass=null;
   try{await loadSelectedClassData(true)}catch(err){alert(friendlyFirebaseError(err))}
+}
+
+
+function teacherInviteMessage(email){
+  const site=`${location.origin}${location.pathname}`;
+  return `You have been invited to DataApp Studio as a teacher.\n\nOpen ${site}\nChoose "Teacher — Sign in" and use this Google account: ${email}\n\nYour teacher account will activate automatically the first time you sign in.`;
+}
+
+function showInviteTeacherModal(){
+  if(!state.teacherAdmin){alert('Only the DataApp Studio administrator can invite teachers.');return}
+  const wrap=document.createElement('div');wrap.className='modal-backdrop';
+  wrap.innerHTML=`<div class="modal"><h3>👩‍🏫 Invite a teacher</h3><p class="muted">Enter the Google email address they will use for DataApp Studio. Invited teachers are teachers only — they cannot invite other teachers.</p><div class="field"><label>Teacher Google email</label><input id="inviteTeacherEmail" type="email" placeholder="teacher@school.org" autocomplete="off"></div><div class="notice"><b>What happens next?</b><br>The teacher opens this site, chooses <b>Teacher — Sign in</b>, and signs in with the invited Google account. Their teacher access is activated automatically.</div><div class="modal-actions"><button class="btn" id="cancelTeacherInvite">Cancel</button><button class="btn primary" id="sendTeacherInvite">Create invite</button></div></div>`;
+  document.body.appendChild(wrap);$('#cancelTeacherInvite').onclick=()=>wrap.remove();$('#inviteTeacherEmail').focus();
+  $('#sendTeacherInvite').onclick=async()=>{
+    const email=$('#inviteTeacherEmail').value.trim().toLowerCase();if(!email)return;
+    const btn=$('#sendTeacherInvite');btn.disabled=true;btn.textContent='Inviting…';
+    try{
+      await createTeacherInvite(state.user,email);
+      await loadTeacherAdminData();
+      const msg=teacherInviteMessage(email);
+      wrap.innerHTML=`<div class="modal"><h3>✓ Teacher invited</h3><p><b>${escapeHtml(email)}</b> is now approved to create a teacher account when they sign in with Google.</p><div class="notice">This version does not send mail silently from your account. You can copy the invitation message or open your normal email app with it ready to send.</div><div class="modal-actions"><button class="btn" id="copyTeacherInvite">Copy invitation</button><button class="btn" id="emailTeacherInvite">Email invitation</button><button class="btn primary" id="doneTeacherInvite">Done</button></div></div>`;
+      $('#doneTeacherInvite').onclick=()=>{wrap.remove();render()};
+      $('#copyTeacherInvite').onclick=async()=>{try{await navigator.clipboard.writeText(msg);$('#copyTeacherInvite').textContent='Copied ✓'}catch{alert(msg)}};
+      $('#emailTeacherInvite').onclick=()=>{const subject=encodeURIComponent('Your DataApp Studio teacher invitation');const body=encodeURIComponent(msg);window.location.href=`mailto:${encodeURIComponent(email)}?subject=${subject}&body=${body}`};
+    }catch(err){alert(friendlyFirebaseError(err));btn.disabled=false;btn.textContent='Create invite'}
+  };
 }
 
 function showCreateClassModal(){
@@ -1443,7 +1530,7 @@ async function bootstrap(){
   try{
     await onAuthChange(async user=>{
       state.authLoading=false;state.user=user;
-      if(!user){state.view='landing';state.role=null;state.profile=null;state.classes=[];state.currentClass=null;render();return}
+      if(!user){state.view='landing';state.role=null;state.profile=null;state.classes=[];state.currentClass=null;state.teacherAdmin=false;state.teacherInvites=[];state.teacherAccounts=[];render();return}
       const desired=sessionStorage.getItem('dataapp_auth_intent')||localStorage.getItem('dataapp_last_role')||'pupil-return';
       sessionStorage.removeItem('dataapp_auth_intent');
       await finishSignedInUser(user,desired);
