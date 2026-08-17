@@ -2,3 +2,6 @@
 
 /* V1.6 multi-page database lists */
 .public-component .database-list{height:100%;width:100%;overflow-y:auto;overflow-x:hidden;background:#fff;border:1px solid #d9deea;border-radius:9px;overscroll-behavior:contain;scrollbar-width:thin}.data-list-row{min-height:58px;display:flex;align-items:center;gap:10px;padding:8px 9px;border-bottom:1px solid #edf0f5;background:#fff;cursor:pointer}.data-list-row:last-child{border-bottom:0}.data-list-row:active{background:#f4f3ff}.list-row-image{width:46px;height:46px;border-radius:50%;overflow:hidden;background:#f0f2f6;display:grid;place-items:center;flex:0 0 auto}.layout-image-only .list-row-image{width:100%;height:110px;border-radius:7px}.list-row-image img{width:100%;height:100%;object-fit:cover}.list-row-copy{min-width:0;flex:1;display:flex;flex-direction:column;gap:3px}.list-row-copy strong,.list-row-copy span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.list-row-copy strong{font-size:14px;color:#20283b}.list-row-copy span{font-size:12px;color:#8790a1}.list-row-arrow{font-size:25px;color:#a4aabd}.list-empty{padding:18px 10px;text-align:center;color:#929aaa;font-size:12px}
+
+/* V1.9 styling */
+.public-component .label{border-radius:7px;overflow:hidden}.public-screen{transition:background .15s ease}

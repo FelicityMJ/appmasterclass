@@ -1,6 +1,6 @@
-# Connect DataApp Studio V1.6 to Firebase
+# Connect DataApp Studio V1.9 to Firebase
 
-This guide is written for the files in this ZIP. V1.6 uses the V1.5 Firebase rules/publishing model and adds multi-page/list features inside the existing project snapshot structure.
+This guide is written for the files in this ZIP. V1.9 uses the existing V1.5 publishing rules model and adds multi-page, multi-app and teacher-controlled Blockly support inside the existing classroom structure.
 
 ## What Firebase is doing
 
@@ -376,3 +376,14 @@ See `UPDATE-V1.5.md` for the exact file replacement and testing sequence.
 ## V1.6 — multiple pages and database lists
 
 V1.6 adds pages, scrollable database lists and master/detail navigation. **No additional Firestore or Storage rule change is required if the V1.5 rules are already published.** See `UPDATE-V1.6.md` for the files to replace.
+
+
+## V1.7 — multiple pupil apps
+
+V1.7 adds a My Apps library using the existing `projects` collection. No additional Firestore or Storage rule change is required from V1.6.
+
+## V1.8 — teacher-controlled Blockly support
+
+V1.8 stores `blockSupportMode` on `classes/{classId}/members/{pupilUid}`. The V1.7 Firestore rules already allow the class owner to update member documents and allow a pupil to read their own member document, so **no rule change is required**.
+
+Teachers choose the support mode per pupil from the class dashboard. Pupils should refresh/reopen the class after a teacher changes the setting.

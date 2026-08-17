@@ -1,5 +1,5 @@
 let registered = false;
-let activeContext = { components: [], fields: [], pages: [] };
+let activeContext = { components: [], fields: [], pages: [], pageId:'' };
 
 const colour = { event: 38, data: 210, screen: 285, navigation: 165 };
 
@@ -14,16 +14,18 @@ function BlocklyLib(){if(!window.Blockly)throw new Error('Blockly did not load.'
 function pageName(id){return activeContext.pages.find(p=>p.id===id)?.name||id||'Page';}
 function componentLabel(c){const page=activeContext.pages.find(p=>p.id===(c.pageId||activeContext.pages[0]?.id));return `${page?.name||'Page'} · ${c.name||c.id}`;}
 function optionPairs(items, emptyLabel, labeler=x=>x.name||x.id){if(!items?.length)return [[emptyLabel,'__none__']];return items.map(x=>[labeler(x),x.id]);}
-function buttonOptions(){return optionPairs(activeContext.components.filter(c=>c.type==='button'),'Add a button first',componentLabel);}
-function listOptions(){return optionPairs(activeContext.components.filter(c=>c.type==='list'),'Add a list first',componentLabel);}
-function componentOptions(){return optionPairs(activeContext.components,'Add a component first',componentLabel);}
+function pageComponents(){return activeContext.components.filter(c=>(c.pageId||activeContext.pages[0]?.id)===activeContext.pageId);}
+function buttonOptions(){return optionPairs(pageComponents().filter(c=>c.type==='button'),'Add a button first',componentLabel);}
+function listOptions(){return optionPairs(pageComponents().filter(c=>c.type==='list'),'Add a list first',componentLabel);}
+function componentOptions(){return optionPairs(pageComponents(),'Add a component first',componentLabel);}
 function fieldOptions(){return optionPairs(activeContext.fields,'Add a database field first');}
 function pageOptions(){return optionPairs(activeContext.pages,'Add a page first');}
+function currentPageOptions(){const p=activeContext.pages.find(x=>x.id===activeContext.pageId)||activeContext.pages[0];return p?[[p.name||'Page',p.id]]:[['Add a page first','__none__']];}
 
 function registerBlocks(){
   if(registered)return;
   const Blockly=BlocklyLib();
-  Blockly.Blocks['das_event_open']={init(){this.appendDummyInput().appendField('when').appendField(new Blockly.FieldDropdown(pageOptions),'PAGE').appendField('opens');this.appendStatementInput('DO').appendField('do');this.setColour(colour.event);this.setTooltip('Runs whenever the chosen page opens.');}};
+  Blockly.Blocks['das_event_open']={init(){this.appendDummyInput().appendField('when').appendField(new Blockly.FieldDropdown(currentPageOptions),'PAGE').appendField('opens');this.appendStatementInput('DO').appendField('do');this.setColour(colour.event);this.setTooltip('Runs whenever the chosen page opens.');}};
   Blockly.Blocks['das_event_click']={init(){this.appendDummyInput().appendField('when').appendField(new Blockly.FieldDropdown(buttonOptions),'COMPONENT').appendField('clicked');this.appendStatementInput('DO').appendField('do');this.setColour(colour.event);this.setTooltip('Runs when the chosen button is clicked.');}};
   Blockly.Blocks['das_event_list_click']={init(){this.appendDummyInput().appendField('when an item in').appendField(new Blockly.FieldDropdown(listOptions),'COMPONENT').appendField('is tapped');this.appendStatementInput('DO').appendField('do');this.setColour(colour.event);this.setTooltip('The tapped row automatically becomes the selected database record.');}};
   Blockly.Blocks['das_first_record']={init(){this.appendDummyInput().appendField('🗃 go to first record');this.setPreviousStatement(true);this.setNextStatement(true);this.setColour(colour.data);this.setTooltip('Moves the database pointer to record 1.');}};
@@ -68,6 +70,18 @@ export function compileBlocklyProgram(workspace){
   return program;
 }
 function makeBlock(workspace,type,fields={}){const b=workspace.newBlock(type);Object.entries(fields).forEach(([k,v])=>{try{b.setFieldValue(String(v??''),k)}catch{}});b.initSvg();b.render();return b;}
+function programForPage(program=[],pageId){
+  const out=[];let include=false;
+  const componentPage=id=>activeContext.components.find(c=>c.id===id)?.pageId||activeContext.pageId;
+  for(const item of program){
+    if(['event_open','event_click','event_list_click'].includes(item.type)){
+      const eventPage=item.type==='event_open'?(item.page||activeContext.pages[0]?.id):componentPage(item.component);
+      include=eventPage===pageId;
+    }
+    if(include)out.push(item);
+  }
+  return out;
+}
 function seedFromLegacy(workspace,program=[]){
   const firstPage=activeContext.pages[0]?.id||'screen1';const groups=[];let current=null;
   for(const item of program){
@@ -93,12 +107,13 @@ function seedFromLegacy(workspace,program=[]){
     }
   }
 }
-export async function initBlocklyEditor({element,project,components,fields,pages,onChange}){
-  const Blockly=await ensureBlockly();registerBlocks();activeContext={components:components||[],fields:fields||[],pages:pages||[]};
+export async function initBlocklyEditor({element,project,pageId,components,fields,pages,onChange}){
+  const Blockly=await ensureBlockly();registerBlocks();activeContext={components:components||[],fields:fields||[],pages:pages||[],pageId:pageId||pages?.[0]?.id||''};
   const workspace=Blockly.inject(element,{toolbox,renderer:'zelos',trashcan:true,move:{scrollbars:true,drag:true,wheel:true},zoom:{controls:true,wheel:true,startScale:.9,maxScale:1.4,minScale:.55,scaleSpeed:1.1},grid:{spacing:20,length:3,colour:'#d9dceb',snap:true}});
-  if(project.blocklyState){try{Blockly.serialization.workspaces.load(project.blocklyState,workspace,{recordUndo:false})}catch(err){console.warn('Could not load Blockly state; rebuilding from saved program.',err);seedFromLegacy(workspace,project.program||[])}}
-  else if(project.program?.length)seedFromLegacy(workspace,project.program);
-  const emit=()=>{const state=Blockly.serialization.workspaces.save(workspace);const program=compileBlocklyProgram(workspace);onChange({blocklyState:state,program})};
+  const pageState=project.blocklyPages?.[activeContext.pageId];
+  if(pageState){try{Blockly.serialization.workspaces.load(pageState,workspace,{recordUndo:false})}catch(err){console.warn('Could not load this page Blockly state; rebuilding from saved program.',err);seedFromLegacy(workspace,programForPage(project.program||[],activeContext.pageId))}}
+  else if(project.program?.length)seedFromLegacy(workspace,programForPage(project.program,activeContext.pageId));
+  const emit=()=>{const state=Blockly.serialization.workspaces.save(workspace);const program=compileBlocklyProgram(workspace);onChange({blocklyState:state,program,pageId:activeContext.pageId})};
   workspace.addChangeListener(event=>{if(event.isUiEvent||event.type===Blockly.Events.FINISHED_LOADING)return;window.clearTimeout(workspace.__dataAppSaveTimer);workspace.__dataAppSaveTimer=window.setTimeout(emit,120)});
   window.setTimeout(()=>Blockly.svgResize(workspace),0);return workspace;
 }

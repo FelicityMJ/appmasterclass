@@ -1,8 +1,19 @@
-# DataApp Studio — classroom V1.8
+# DataApp Studio — classroom V1.9
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.8 keeps the multi-app, multi-page, Blockly and Android publishing foundation and adds teacher-controlled block support so pupils can build programming themselves with tutorials.
+A child-friendly database + app builder aimed at roughly age 12–13. V1.9 keeps the multi-app, multi-page, Blockly and Android publishing foundation and adds teacher-controlled block support so pupils can build programming themselves with tutorials.
 
 
+
+## New in V1.9
+
+- four draggable corner handles resize components directly on the phone canvas;
+- page background colour plus text/background colours for labels, buttons and text boxes;
+- Blockly is split by app page, so pupils edit only the current page's blocks;
+- new database type **Image link (URL)** displays externally hosted images without using an upload slot;
+- new **Rating (1–10 stars)** field with clickable stars in the database and star display in lists/details;
+- no Firebase rule change is required from V1.8.
+
+See `UPDATE-V1.9.md` when upgrading an already connected V1.8 site.
 
 ## New in V1.8
 

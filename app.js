@@ -106,11 +106,12 @@ const projectTemplates = {
     tableName:'MyData',
     fields:[],
     records:[],
-    pages:[{id:'screen1',name:'Home'}],
+    pages:[{id:'screen1',name:'Home',backgroundColor:'#ffffff'}],
     components:[],
     program:[],
     tutorialEnabled:true,
-    blocklyState:null
+    blocklyState:null,
+    blocklyPages:{}
   }
 };
 
@@ -125,12 +126,14 @@ function freshBlankProject(name='My New App', assignmentId=''){
 }
 function normaliseProject(project){
   project=project||freshBlankProject();
-  if(!Array.isArray(project.pages)||!project.pages.length) project.pages=[{id:'screen1',name:'Home'}];
-  project.pages=project.pages.map((pg,i)=>({id:pg.id||`screen${i+1}`,name:pg.name||`Page ${i+1}`}));
+  if(!Array.isArray(project.pages)||!project.pages.length) project.pages=[{id:'screen1',name:'Home',backgroundColor:'#ffffff'}];
+  project.pages=project.pages.map((pg,i)=>({id:pg.id||`screen${i+1}`,name:pg.name||`Page ${i+1}`,backgroundColor:pg.backgroundColor||'#ffffff'}));
   const first=project.pages[0].id;
   project.components=Array.isArray(project.components)?project.components:[];
   for(const c of project.components){
     if(!c.pageId||!project.pages.some(p=>p.id===c.pageId))c.pageId=first;
+    if(c.textColor===undefined)c.textColor=c.type==='button'?'#ffffff':'#172033';
+    if(c.backgroundColor===undefined)c.backgroundColor=c.type==='button'?'#5b5ce2':c.type==='input'?'#ffffff':'';
     if(c.type==='list'){
       c.listLayout=c.listLayout||'image-title-subtitle';
       c.listImageField=c.listImageField||'';
@@ -140,6 +143,7 @@ function normaliseProject(project){
     }
   }
   project.program=Array.isArray(project.program)?project.program:[];
+  project.blocklyPages=(project.blocklyPages&&typeof project.blocklyPages==='object')?project.blocklyPages:{};
   for(const b of project.program)if(b.type==='event_open'&&!b.page)b.page=first;
   return project;
 }
@@ -284,7 +288,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.8</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.9</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this account is not yet on the teacher allow-list.</p>
     <div class="notice"><b>Your Firebase UID</b><div class="uid-box">${escapeHtml(state.user.uid)}</div></div>
     <p class="muted">In Firestore create <b>teacherAllowlist → ${escapeHtml(state.user.uid)}</b> with the field <b>enabled = true</b>, then click Check again.</p>
@@ -294,7 +298,7 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.8 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.9 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -453,9 +457,19 @@ function dataView(){return `<div class="section-head"><div><h2>Build your databa
 <div class="notice"><b>Database words:</b> a <b>field</b> is a column/type of information; a <b>record</b> is one complete row/item. Your first field should normally be a unique ID.</div>
 ${!state.project.fields.length?`<div class="blank-builder-state"><div class="big-emoji">🗃️</div><h3>Your database is completely empty</h3><p>Good — you are building it yourself. Start by clicking <b>+ Add field</b>. The tutorial above will guide you.</p></div>`:
 `<div class="data-wrap"><table class="data-table"><thead><tr><th class="row-num">#</th>${state.project.fields.map(f=>`<th>${escapeHtml(f.name)}<span class="data-type">${typeIcon(f.type)} ${f.type}</span></th>`).join('')}<th></th></tr></thead><tbody>${state.project.records.map((r,ri)=>`<tr><td class="row-num">${ri+1}</td>${state.project.fields.map(f=>`<td>${dataCell(f,r,ri)}</td>`).join('')}<td><button class="icon-btn" data-delete-record="${ri}" title="Delete record">✕</button></td></tr>`).join('')}</tbody></table>${!state.project.records.length?'<div class="empty-note" style="margin-top:12px">Fields created. Now click <b>+ Add record</b> and enter your own data.</div>':''}</div>`}` }
+function ratingStars(value){
+  const n=Math.max(0,Math.min(10,Number(value)||0));
+  return '★'.repeat(n)+'☆'.repeat(10-n);
+}
+function formatFieldValue(fieldId,value){
+  const f=state.project.fields.find(x=>x.id===fieldId);
+  return f?.type==='rating'?ratingStars(value):String(value??'');
+}
 function dataCell(f,r,ri){
   const value=r[f.id]??'';
   if(f.type==='image') return `<div class="image-cell"><img src="${escapeAttr(resolveImage(value))}" alt=""><button class="btn small" data-image-record="${ri}" data-image-field="${f.id}">Change</button></div>`;
+  if(f.type==='imageUrl') return `<input data-record="${ri}" data-field="${f.id}" value="${escapeAttr(value)}" type="url" placeholder="https://example.com/photo.jpg">`;
+  if(f.type==='rating') return `<div class="rating-cell" data-rating-record="${ri}" data-rating-field="${f.id}"><div class="rating-stars">${Array.from({length:10},(_,i)=>`<button type="button" class="rating-star ${i<Number(value||0)?'on':''}" data-rating-value="${i+1}" title="${i+1} out of 10">★</button>`).join('')}</div><small>${Number(value)||0}/10</small></div>`;
   if(f.type==='boolean') return `<select data-record="${ri}" data-field="${f.id}"><option value="" ${value===''?'selected':''}>Choose…</option><option value="true" ${String(value)==='true'?'selected':''}>Yes</option><option value="false" ${String(value)==='false'?'selected':''}>No</option></select>`;
   const type=f.type==='number'?'number':f.type==='date'?'date':'text';
   return `<input data-record="${ri}" data-field="${f.id}" value="${escapeAttr(value)}" type="${type}">`;
@@ -467,7 +481,7 @@ function currentPage(){
 function pageName(id){return state.project.pages.find(p=>p.id===id)?.name||'Page';}
 function componentsOnPage(pageId=state.currentPageId){return state.project.components.filter(c=>(c.pageId||state.project.pages[0]?.id)===pageId);}
 function fieldOptionsHtml(selected='',type='any',blank='Choose field…'){
-  const fields=state.project.fields.filter(f=>type==='image'?f.type==='image':type==='text'?f.type!=='image':true);
+  const fields=state.project.fields.filter(f=>type==='image'?['image','imageUrl'].includes(f.type):type==='text'?!['image','imageUrl'].includes(f.type):true);
   return `<option value="">${blank}</option>`+fields.map(f=>`<option value="${f.id}" ${f.id===selected?'selected':''}>${escapeHtml(f.name)} · ${escapeHtml(f.type)}</option>`).join('');
 }
 function pageOptionsHtml(selected='',exclude=''){
@@ -490,10 +504,11 @@ function designView(){
 function autoBlocksEnabled(){return state.blockSupportMode==='auto';}
 function propertiesMarkup(){
   const c=state.project.components.find(x=>x.id===state.selectedComponent);
-  if(!c) return `<h3>Properties</h3><div class="empty-note">Click a component on ${escapeHtml(currentPage()?.name||'this page')} to change its properties.</div>`;
+  if(!c){const pg=currentPage();return `<h3>${escapeHtml(pg?.name||'Page')}</h3><div class="prop-group"><label>Page background</label><div class="colour-row"><input data-page-prop="backgroundColor" type="color" value="${escapeAttr(pg?.backgroundColor||'#ffffff')}"><span>${escapeHtml(pg?.backgroundColor||'#ffffff')}</span></div></div><div class="empty-note">Click a component on ${escapeHtml(pg?.name||'this page')} to change its properties.</div>`;}
   return `<h3>${escapeHtml(c.name)}</h3>
   <div class="prop-group"><label>Name</label><input data-prop="name" value="${escapeAttr(c.name)}"></div>
   ${c.type!=='image'&&c.type!=='list'?`<div class="prop-group"><label>Text</label><input data-prop="text" value="${escapeAttr(c.text||'')}"></div>`:''}
+  ${['label','button','input'].includes(c.type)?`<div class="prop-group colour-grid"><label>Text colour</label><input data-prop="textColor" type="color" value="${escapeAttr(c.textColor||'#172033')}"><label>Background colour</label><input data-prop="backgroundColor" type="color" value="${escapeAttr(c.backgroundColor||'#ffffff')}"></div>`:''}
   ${c.type==='image'?`<div class="prop-group"><label>Image</label><div class="property-image-preview"><img src="${escapeAttr(resolveImage(c.src))}" alt=""></div><button class="btn" style="width:100%" data-action="choose-component-image">🖼 Choose image</button></div>`:''}
   ${c.type==='label'?`<div class="prop-group"><label>Font size</label><input data-prop="fontSize" type="number" min="10" max="48" value="${c.fontSize||16}"></div><div class="prop-group"><label>Alignment</label><select data-prop="align"><option ${c.align==='left'?'selected':''}>left</option><option ${c.align==='center'?'selected':''}>center</option><option ${c.align==='right'?'selected':''}>right</option></select></div>`:''}
   ${c.type==='list'?listPropertiesMarkup(c):''}
@@ -524,15 +539,15 @@ function listPropertiesMarkup(c){
 }
 function phoneMarkup(mode='design'){
   const pageId=state.currentPageId||state.project.pages[0]?.id;
-  return `<div class="phone device-${state.device}"><div class="screen" data-phone-mode="${mode}" data-page-id="${escapeAttr(pageId)}">${componentsOnPage(pageId).map(c=>componentMarkup(c,mode)).join('')}</div></div>`;
+  const pg=state.project.pages.find(p=>p.id===pageId);return `<div class="phone device-${state.device}"><div class="screen" style="background:${escapeAttr(pg?.backgroundColor||'#ffffff')}" data-phone-mode="${mode}" data-page-id="${escapeAttr(pageId)}">${componentsOnPage(pageId).map(c=>componentMarkup(c,mode)).join('')}</div></div>`;
 }
 function listRowsMarkup(c,mode){
   const rows=state.project.records||[];
   if(!rows.length)return `<div class="list-empty">No database records yet</div>`;
   return rows.map((r,i)=>{
     const image=c.listImageField?resolveImage(r[c.listImageField]):'';
-    const title=c.listTitleField?String(r[c.listTitleField]??''):'';
-    const subtitle=c.listSubtitleField?String(r[c.listSubtitleField]??''):'';
+    const title=c.listTitleField?formatFieldValue(c.listTitleField,r[c.listTitleField]):'';
+    const subtitle=c.listSubtitleField?formatFieldValue(c.listSubtitleField,r[c.listSubtitleField]):'';
     const rowClass=`data-list-row layout-${c.listLayout||'image-title-subtitle'}`;
     return `<div class="${rowClass}" ${mode==='test'?`data-list-index="${i}"`:''}>
       ${c.listLayout?.includes('image')?`<div class="list-row-image">${image?`<img src="${escapeAttr(image)}" alt="">`:'<span>🖼️</span>'}</div>`:''}
@@ -545,13 +560,15 @@ function componentMarkup(c,mode){
   const sel=mode==='design'&&state.selectedComponent===c.id?'selected':'';
   const style=`left:${c.x}px;top:${c.y}px;width:${c.w}px;height:${c.h}px;`;
   const attrs=mode==='design'?`data-component="${c.id}"`:`data-test-component="${c.id}"`;
+  const textColor=escapeAttr(c.textColor||'#172033'),bg=escapeAttr(c.backgroundColor||'transparent');
   let inner='';
-  if(c.type==='label') inner=`<div class="label" style="font-size:${c.fontSize||16}px;text-align:${c.align||'left'}">${escapeHtml(c.text||'Label')}</div>`;
-  if(c.type==='button') inner=`<button>${escapeHtml(c.text||'Button')}</button>`;
+  if(c.type==='label') inner=`<div class="label" style="font-size:${c.fontSize||16}px;text-align:${c.align||'left'};color:${textColor};background:${bg}">${escapeHtml(c.text||'Label')}</div>`;
+  if(c.type==='button') inner=`<button style="background:${escapeAttr(c.backgroundColor||'#5b5ce2')};color:${escapeAttr(c.textColor||'#ffffff')}">${escapeHtml(c.text||'Button')}</button>`;
   if(c.type==='image') inner=`<img src="${escapeAttr(resolveImage(c.src))}" alt="">`;
-  if(c.type==='input') inner=`<input placeholder="${escapeAttr(c.text||'Type here...')}">`;
+  if(c.type==='input') inner=`<input style="background:${escapeAttr(c.backgroundColor||'#ffffff')};color:${textColor}" placeholder="${escapeAttr(c.text||'Type here...')}">`;
   if(c.type==='list') inner=`<div class="listbox database-list">${listRowsMarkup(c,mode)}</div>`;
-  return `<div class="screen-component ${sel}" ${attrs} style="${style}">${inner}</div>`;
+  const handles=mode==='design'&&sel?['nw','ne','sw','se'].map(pos=>`<span class="resize-handle resize-${pos}" data-resize-handle="${pos}" title="Drag to resize"></span>`).join(''):'';
+  return `<div class="screen-component ${sel}" ${attrs} style="${style}">${inner}${handles}</div>`;
 }
 
 function blockTutorialCard(){
@@ -564,7 +581,8 @@ function blockTutorialCard(){
   if(kind==='data') {title=`Show database data in ${name}`;body=`<ol><li>Open <b>Events</b> and drag <b>when [Details] opens</b>.</li><li>Open <b>Screen</b> and drag <b>set … to … from selected record</b> inside it.</li><li>Choose <b>${name}</b> as the component.</li><li>Choose the database field it should display.</li><li>Repeat with the other placeholders on the Details page.</li></ol>`;}
   return `<div class="block-tutorial-card"><div class="block-tutorial-head"><div><span class="tag ${autoBlocksEnabled()?'tag-good':''}">${autoBlocksEnabled()?'✨ Auto-add support ON':'🧩 You build the blocks'}</span><h3>${title}</h3></div></div><div class="block-help-tabs"><button class="btn small ${kind==='button'?'primary':''}" data-block-help="button">Button</button><button class="btn small ${kind==='list'?'primary':''}" data-block-help="list">List → Details</button><button class="btn small ${kind==='data'?'primary':''}" data-block-help="data">Details placeholders</button></div><div class="block-tutorial-body">${body}</div></div>`;
 }
-function blocksView(){return `<div class="section-head"><div><h2>Make it work with real Blockly</h2><p>Events say <i>when</i> something happens. Snap the action you want inside the event.</p></div><button class="btn good" data-tab="test">▶ Run app</button></div>
+function blocksView(){const pg=currentPage();return `<div class="section-head"><div><h2>Make ${escapeHtml(pg?.name||'this page')} work</h2><p>Each page has its own Blockly workspace, so you only see the blocks for the page you are programming.</p></div><button class="btn good" data-tab="test">▶ Run app</button></div>
+<div class="page-strip blocks-page-strip"><div class="page-tabs">${state.project.pages.map((p,i)=>`<button class="page-tab ${p.id===state.currentPageId?'active':''}" data-block-page="${p.id}"><span>${escapeHtml(p.name)}</span><small>Page ${i+1} blocks</small></button>`).join('')}</div><div class="page-actions"><span class="tag">Editing: ${escapeHtml(pg?.name||'Page')}</span></div></div>
 ${blockTutorialCard()}
 <div class="blockly-layout"><section class="blockly-card"><div class="blockly-help"><b>Remember:</b> <span>A list tap chooses the selected database record. Screen blocks display fields from it, and Navigation blocks move between pages.</span></div><div id="blocklyDiv" class="blockly-workspace"></div></section>
 <aside class="code-panel blockly-code"><div style="display:flex;justify-content:space-between;align-items:center"><h3>Show code</h3><span class="tag">Live</span></div><div class="code-toggle"><button data-code-mode="python" class="${state.codeMode==='python'?'active':''}">Python idea</button><button data-code-mode="plain" class="${state.codeMode==='plain'?'active':''}">Plain English</button></div><div class="codebox" id="generatedCode">${escapeHtml(generateCode())}</div><div class="mini-checks">${checklistBadges()}</div><div class="notice" style="margin-top:12px">${autoBlocksEnabled()?'Your teacher has enabled <b>Auto-add block support</b>. Design shortcuts may create starter blocks for you. You can still change them yourself.':'Design shortcuts will <b>not</b> create Blockly for you. Use the tutorial above and build the blocks yourself.'}</div></aside></div>`}
@@ -717,9 +735,10 @@ function bindBuilder(){
 
 function bindData(){
   $$('.data-table [data-record][data-field]').forEach(inp=>{const update=()=>{const r=state.project.records[+inp.dataset.record];const f=state.project.fields.find(x=>x.id===inp.dataset.field);let v=inp.value;if(f.type==='number')v=Number(v);if(f.type==='boolean'&&v!=='')v=v==='true';r[f.id]=v;saveProject()};inp.oninput=update;inp.onchange=update});
+  $$('.rating-star[data-rating-value]').forEach(btn=>btn.onclick=()=>{const host=btn.closest('[data-rating-record]'),r=state.project.records[Number(host.dataset.ratingRecord)],f=host.dataset.ratingField;if(!r)return;r[f]=Number(btn.dataset.ratingValue);saveProject();render()});
   $$('[data-image-record]').forEach(b=>b.onclick=()=>showImageModal(+b.dataset.imageRecord,b.dataset.imageField));
   $$('[data-delete-record]').forEach(b=>b.onclick=()=>{state.project.records.splice(+b.dataset.deleteRecord,1);saveProject();render()});
-  const addRecord=$('[data-action="add-record"]'); if(addRecord)addRecord.onclick=()=>{if(!state.project.fields.length){alert('Add at least one field before adding a record.');return}const row={};state.project.fields.forEach(f=>row[f.id]=f.type==='number'?0:f.type==='boolean'?false:'');if(state.project.fields[0]) row[state.project.fields[0].id]=nextId();state.project.records.push(row);saveProject();render()};
+  const addRecord=$('[data-action="add-record"]'); if(addRecord)addRecord.onclick=()=>{if(!state.project.fields.length){alert('Add at least one field before adding a record.');return}const row={};state.project.fields.forEach(f=>row[f.id]=['number','rating'].includes(f.type)?0:f.type==='boolean'?false:'');if(state.project.fields[0]) row[state.project.fields[0].id]=nextId();state.project.records.push(row);saveProject();render()};
   $('[data-action="add-field"]').onclick=()=>showFieldModal();
   const projectName=$('#projectNameInput'); if(projectName)projectName.oninput=()=>{state.project.name=projectName.value;if(!state.project.publish)state.project.publish={};state.project.publish.appName=projectName.value;saveProject()};
   const tableName=$('#tableNameInput'); if(tableName)tableName.oninput=()=>{state.project.tableName=tableName.value;saveProject()};
@@ -810,8 +829,8 @@ function showBankManager(){
 
 function nextId(){const f=state.project.fields[0];if(!f) return state.project.records.length+1;return Math.max(0,...state.project.records.map(r=>Number(r[f.id])||0))+1}
 function showFieldModal(){
-  const wrap=document.createElement('div');wrap.className='modal-backdrop';wrap.innerHTML=`<div class="modal"><h3>Add a field</h3><div class="field"><label>Field name</label><input id="newFieldName" placeholder="e.g. Rating"></div><div class="field"><label>Data type</label><select id="newFieldType"><option value="text">Text</option><option value="number">Number</option><option value="boolean">Yes / No</option><option value="image">Image</option><option value="date">Date</option></select></div><div class="modal-actions"><button class="btn" id="cancelModal">Cancel</button><button class="btn primary" id="createField">Add field</button></div></div>`;document.body.appendChild(wrap);
-  $('#cancelModal').onclick=()=>wrap.remove();$('#createField').onclick=()=>{const name=$('#newFieldName').value.trim();if(!name)return;let id=name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||`field_${Date.now()}`;if(state.project.fields.some(f=>f.id===id)) id+=`_${Date.now().toString().slice(-4)}`;const type=$('#newFieldType').value;state.project.fields.push({id,name,type});state.project.records.forEach(r=>r[id]=type==='number'?0:'');wrap.remove();saveProject();render()};
+  const wrap=document.createElement('div');wrap.className='modal-backdrop';wrap.innerHTML=`<div class="modal"><h3>Add a field</h3><div class="field"><label>Field name</label><input id="newFieldName" placeholder="e.g. Rating"></div><div class="field"><label>Data type</label><select id="newFieldType"><option value="text">Text</option><option value="number">Number</option><option value="boolean">Yes / No</option><option value="image">Image upload / bank</option><option value="imageUrl">Image link (URL)</option><option value="rating">Rating (1–10 stars)</option><option value="date">Date</option></select></div><div class="modal-actions"><button class="btn" id="cancelModal">Cancel</button><button class="btn primary" id="createField">Add field</button></div></div>`;document.body.appendChild(wrap);
+  $('#cancelModal').onclick=()=>wrap.remove();$('#createField').onclick=()=>{const name=$('#newFieldName').value.trim();if(!name)return;let id=name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||`field_${Date.now()}`;if(state.project.fields.some(f=>f.id===id)) id+=`_${Date.now().toString().slice(-4)}`;const type=$('#newFieldType').value;state.project.fields.push({id,name,type});state.project.records.forEach(r=>r[id]=['number','rating'].includes(type)?0:'');wrap.remove();saveProject();render()};
 }
 
 function pruneProgram(deletedIds=new Set(),deletedPage=''){
@@ -822,12 +841,12 @@ function pruneProgram(deletedIds=new Set(),deletedPage=''){
       if(!skipGroup)kept.push(b);
     }else if(!skipGroup&&!deletedIds.has(b.target)&&!(b.type==='navigate_page'&&deletedPage&&b.page===deletedPage))kept.push(b);
   }
-  state.project.program=kept;state.project.blocklyState=null;
+  state.project.program=kept;state.project.blocklyState=null;state.project.blocklyPages={};
 }
 function bindDesign(){
   $$('[data-page-select]').forEach(b=>b.onclick=()=>{state.currentPageId=b.dataset.pageSelect;state.selectedComponent=null;saveProject();render()});
   const addPage=$('[data-action="add-page"]');if(addPage)addPage.onclick=()=>{
-    const n=state.project.pages.length+1;const id=`screen_${Date.now()}`;state.project.pages.push({id,name:`Page ${n}`});state.currentPageId=id;state.selectedComponent=null;saveProject();render();
+    const n=state.project.pages.length+1;const id=`screen_${Date.now()}`;state.project.pages.push({id,name:`Page ${n}`,backgroundColor:'#ffffff'});state.currentPageId=id;state.selectedComponent=null;saveProject();render();
   };
   const renamePage=$('[data-action="rename-page"]');if(renamePage)renamePage.onclick=()=>{
     const pg=currentPage();const name=prompt('Page name:',pg?.name||'Page');if(name?.trim()){pg.name=name.trim().slice(0,30);saveProject();render()}
@@ -838,11 +857,11 @@ function bindDesign(){
     state.project.components=state.project.components.filter(c=>c.pageId!==pg.id);
     pruneProgram(ids,pg.id);
     for(const c of state.project.components)if(c.type==='list'&&c.navigateToPage===pg.id)c.navigateToPage='';
-    state.project.pages=state.project.pages.filter(p=>p.id!==pg.id);state.currentPageId=state.project.pages[0].id;state.selectedComponent=null;state.project.blocklyState=null;saveProject();render();
+    state.project.pages=state.project.pages.filter(p=>p.id!==pg.id);delete state.project.blocklyPages?.[pg.id];state.currentPageId=state.project.pages[0].id;state.selectedComponent=null;state.project.blocklyState=null;saveProject();render();
   };
   $$('[data-add-component]').forEach(b=>b.onclick=()=>{
     const type=b.dataset.addComponent;const n=state.project.components.filter(c=>c.type===type).length+1;
-    const c={id:`${type}_${Date.now()}`,type,name:`${cap(type)}${n}`,pageId:state.currentPageId,x:30,y:75+(n*18),w:type==='image'?220:type==='list'?280:200,h:type==='image'?150:type==='label'?44:type==='list'?330:44,text:type==='button'?'Button':type==='input'?'Type here...':type==='label'?'New label':'',fontSize:18,align:'center',src:type==='image'?imageSvg('🖼️','Your image'):'',listLayout:'image-title-subtitle',listImageField:'',listTitleField:'',listSubtitleField:'',navigateToPage:''};
+    const c={id:`${type}_${Date.now()}`,type,name:`${cap(type)}${n}`,pageId:state.currentPageId,x:30,y:75+(n*18),w:type==='image'?220:type==='list'?280:200,h:type==='image'?150:type==='label'?44:type==='list'?330:44,text:type==='button'?'Button':type==='input'?'Type here...':type==='label'?'New label':'',fontSize:18,align:'center',textColor:type==='button'?'#ffffff':'#172033',backgroundColor:type==='button'?'#5b5ce2':type==='input'?'#ffffff':'',src:type==='image'?imageSvg('🖼️','Your image'):'',listLayout:'image-title-subtitle',listImageField:'',listTitleField:'',listSubtitleField:'',navigateToPage:''};
     state.project.components.push(c);state.selectedComponent=c.id;saveProject();render()
   });
   $$('.screen-component[data-component]').forEach(el=>{
@@ -853,6 +872,13 @@ function bindDesign(){
       el.onpointerup=()=>{el.onpointermove=null;saveProject();render()};
     };
   });
+  $$('[data-resize-handle]').forEach(handle=>handle.onpointerdown=e=>{
+    e.preventDefault();e.stopPropagation();const el=handle.closest('.screen-component'),c=state.project.components.find(x=>x.id===el?.dataset.component);if(!el||!c)return;
+    const corner=handle.dataset.resizeHandle,startX=e.clientX,startY=e.clientY,start={x:c.x,y:c.y,w:c.w,h:c.h};const screen=el.closest('.screen');const maxW=screen.clientWidth,maxH=screen.clientHeight;handle.setPointerCapture(e.pointerId);
+    handle.onpointermove=ev=>{const dx=ev.clientX-startX,dy=ev.clientY-startY;let x=start.x,y=start.y,w=start.w,h=start.h;const minW=c.type==='list'?140:60,minH=c.type==='list'?100:32;if(corner.includes('e'))w=Math.max(minW,Math.min(maxW-start.x,start.w+dx));if(corner.includes('s'))h=Math.max(minH,Math.min(maxH-start.y,start.h+dy));if(corner.includes('w')){const nx=Math.max(0,Math.min(start.x+start.w-minW,start.x+dx));w=start.w+(start.x-nx);x=nx}if(corner.includes('n')){const ny=Math.max(36,Math.min(start.y+start.h-minH,start.y+dy));h=start.h+(start.y-ny);y=ny}c.x=x;c.y=y;c.w=w;c.h=h;Object.assign(el.style,{left:x+'px',top:y+'px',width:w+'px',height:h+'px'})};
+    handle.onpointerup=()=>{handle.onpointermove=null;saveProject();render()};
+  });
+  $$('[data-page-prop]').forEach(inp=>inp.oninput=()=>{const pg=currentPage();if(!pg)return;pg[inp.dataset.pageProp]=inp.value;saveProject();const screen=$('.screen[data-page-id="'+CSS.escape(pg.id)+'"]');if(screen)screen.style.background=inp.value;});
   $$('[data-prop]').forEach(inp=>inp.oninput=()=>{const c=state.project.components.find(x=>x.id===state.selectedComponent);let v=inp.value;if(['w','h','fontSize'].includes(inp.dataset.prop))v=Number(v);c[inp.dataset.prop]=v;saveProject();render()});
   $$('[data-list-prop]').forEach(inp=>inp.onchange=()=>{
     const c=state.project.components.find(x=>x.id===state.selectedComponent);if(!c||c.type!=='list')return;
@@ -884,19 +910,21 @@ function connectListNavigation(c){
     state.project.program.push({id:`b_${Date.now()}_list`,type:'event_list_click',component:c.id});
     state.project.program.push({id:`b_${Date.now()}_nav`,type:'navigate_page',page:c.navigateToPage});
   }
-  state.project.blocklyState=null;
+  state.project.blocklyState=null;state.project.blocklyPages=state.project.blocklyPages||{};delete state.project.blocklyPages[c.pageId||state.project.pages[0]?.id];
 }
 
 function bindBlocks(){
+  $$('[data-block-page]').forEach(b=>b.onclick=()=>{state.currentPageId=b.dataset.blockPage;state.selectedComponent=null;render()});
   $$('[data-block-help]').forEach(b=>b.onclick=()=>{state.blockTutorial=b.dataset.blockHelp||'overview';render()});
   const host=$('#blocklyDiv');
   if(host){
     requestAnimationFrame(async()=>{
       try{
+        const pageId=state.currentPageId||state.project.pages[0]?.id;
         state.blocklyWorkspace=await initBlocklyEditor({
-          element:host,project:state.project,components:state.project.components,fields:state.project.fields,pages:state.project.pages,
+          element:host,project:state.project,pageId,components:state.project.components,fields:state.project.fields,pages:state.project.pages,
           onChange:({blocklyState,program})=>{
-            state.project.blocklyState=blocklyState; state.project.program=program; saveProject();
+            state.project.blocklyPages=state.project.blocklyPages||{};state.project.blocklyPages[pageId]=blocklyState;replaceProgramForPage(pageId,program);saveProject();
             const code=$('#generatedCode'); if(code)code.textContent=generateCode();
           }
         });
@@ -1001,7 +1029,7 @@ function connectComponent(componentId,fieldId){
     eventIndex=state.project.program.length-1;
   }
   state.project.program.splice(eventIndex+1,0,{id:`b_${Date.now()}_${Math.random().toString(36).slice(2,5)}`,type:'set_field',target:componentId,field:fieldId});
-  state.project.blocklyState=null;
+  state.project.blocklyState=null;state.project.blocklyPages=state.project.blocklyPages||{};delete state.project.blocklyPages[pageId];
 }
 function connectionsFor(componentId){
   const fields=[...new Set(state.project.program.filter(b=>b.type==='set_field'&&b.target===componentId).map(b=>nameOfField(b.field)))];
@@ -1071,15 +1099,37 @@ function applyField(targetId,fieldId){
   const c=state.project.components.find(x=>x.id===targetId), f=state.project.fields.find(x=>x.id===fieldId), r=state.project.records[state.currentRecord];
   if(!c||!f||!r){log('A block is missing a component or field.','warn');return}
   const value=r[fieldId]??'';
-  if(c.type==='image') c.src=String(value); else if(c.type!=='list') c.text=String(value);
+  if(c.type==='image') c.src=String(value); else if(c.type!=='list') c.text=f.type==='rating'?ratingStars(value):String(value);
   log(`${c.name} ← ${f.name} from selected record`,'good');
 }
 function applyText(targetId,text){const c=state.project.components.find(x=>x.id===targetId);if(!c){log('A text block is missing its component.','warn');return}if(c.type!=='image'&&c.type!=='list')c.text=String(text||'');log(`${c.name} text updated`,'good')}
 function log(text,kind=''){state.testLogs.push({text,kind});if(state.testLogs.length>18)state.testLogs.shift()}
 
+function eventPageId(event){
+  if(event.type==='event_open')return event.page||state.project.pages[0]?.id;
+  if(['event_click','event_list_click'].includes(event.type))return state.project.components.find(c=>c.id===event.component)?.pageId||state.project.pages[0]?.id;
+  return '';
+}
+function programForPage(pageId){
+  const out=[];let include=false;
+  for(const b of state.project.program||[]){
+    if(['event_open','event_click','event_list_click'].includes(b.type))include=eventPageId(b)===pageId;
+    if(include)out.push(b);
+  }
+  return out;
+}
+function replaceProgramForPage(pageId,pageProgram){
+  const kept=[];let include=false;
+  for(const b of state.project.program||[]){
+    if(['event_open','event_click','event_list_click'].includes(b.type))include=eventPageId(b)===pageId;
+    if(!include)kept.push(b);
+  }
+  state.project.program=[...kept,...pageProgram];
+}
 function generateCode(){
+  const visibleProgram=programForPage(state.currentPageId);
   if(state.codeMode==='plain'){
-    return state.project.program.map(b=>{
+    return visibleProgram.map(b=>{
       if(b.type==='event_open')return `WHEN ${pageName(b.page||state.project.pages[0]?.id)} opens:`;
       if(b.type==='event_click')return `WHEN ${nameOfComponent(b.component)} is clicked:`;
       if(b.type==='event_list_click')return `WHEN an item in ${nameOfComponent(b.component)} is tapped:  (that row becomes the selected record)`;
@@ -1094,7 +1144,7 @@ function generateCode(){
     }).filter(Boolean).join('\n');
   }
   const out=[];
-  state.project.program.forEach(b=>{
+  visibleProgram.forEach(b=>{
     if(b.type==='event_open')out.push(`def ${safeName(pageName(b.page||state.project.pages[0]?.id))}_opened():`);
     if(b.type==='event_click')out.push(`\ndef ${safeName(nameOfComponent(b.component))}_clicked():`);
     if(b.type==='event_list_click')out.push(`\ndef ${safeName(nameOfComponent(b.component))}_item_tapped(clicked_record):\n    record = clicked_record`);
@@ -1111,7 +1161,7 @@ function generateCode(){
 function nameOfComponent(id){return state.project.components.find(c=>c.id===id)?.name||'component'}
 function nameOfField(id){return state.project.fields.find(f=>f.id===id)?.name||'field'}
 function safeName(s){return String(s).replace(/\W+/g,'_').replace(/^\d/,'_$&')}
-function typeIcon(t){return ({text:'Aa',number:'#',boolean:'✓',image:'▧',date:'◷'})[t]||'•'}
+function typeIcon(t){return ({text:'Aa',number:'#',boolean:'✓',image:'▧',imageUrl:'🔗',rating:'★',date:'◷'})[t]||'•'}
 function cap(s){return s.charAt(0).toUpperCase()+s.slice(1)}
 function escapeHtml(s){return String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}
 function escapeAttr(s){return escapeHtml(s).replace(/'/g,'&#39;')}
