@@ -2,7 +2,7 @@ import {
   isFirebaseEnabled, onAuthChange, signInWithGoogle, signOutUser,
   isApprovedTeacher, ensureUserProfile, getUserProfile,
   createClass as cloudCreateClass, listTeacherClasses, joinClassByCode,
-  listPupilClasses, getClass as cloudGetClass, listClassMembers,
+  listPupilClasses, getClass as cloudGetClass, listClassMembers, getClassMember, updateClassMemberSettings,
   removeClassMember, regenerateJoinCode, saveAssignment as cloudSaveAssignment,
   listAssignments as cloudListAssignments, saveProjectToCloud,
   listMyProjects, listClassProjects, listPersonalImages,
@@ -234,6 +234,9 @@ const state = {
   currentClass:null,
   members:[],
   classProjects:[],
+  pupilMember:null,
+  blockSupportMode:'manual',
+  blockTutorial:'overview',
   cloudProjects:CLOUD_MODE?[]:loadLocalProjects(),
   cloudStatus:CLOUD_MODE?'Waiting for sign-in':'Local preview mode',
   authError:''
@@ -281,7 +284,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.7</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.8</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this account is not yet on the teacher allow-list.</p>
     <div class="notice"><b>Your Firebase UID</b><div class="uid-box">${escapeHtml(state.user.uid)}</div></div>
     <p class="muted">In Firestore create <b>teacherAllowlist → ${escapeHtml(state.user.uid)}</b> with the field <b>enabled = true</b>, then click Check again.</p>
@@ -291,7 +294,7 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.7 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.8 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -372,8 +375,8 @@ function teacherView(){
     <div class="section-head"><div><h2 style="font-size:19px">Assignments</h2><p>These appear automatically on pupils' dashboards.</p></div></div>
     <div class="cards" style="margin-bottom:16px">${state.assignments.length?state.assignments.map(a=>`<div class="card"><div class="tag">${escapeHtml(a.level||'Guided')}</div><h3>${escapeHtml(a.title)}</h3><p class="muted">${a.requirements?.records||1}+ records · ${a.requirements?.components||4}+ components · ${a.requirements?.blocks||4}+ blocks</p><button class="btn small" data-start-assignment="${escapeAttr(a.id)}">Preview task</button></div>`).join(''):'<div class="card"><div class="empty-note">No assignments yet. Click + New assignment.</div></div>'}</div>
     <div class="card"><div class="section-head"><div><h2 style="font-size:19px">Pupils & projects</h2><p>Real members and saved projects from Firestore.</p></div></div>
-      <table class="class-table"><thead><tr><th>Pupil</th><th>Email</th><th>Apps</th><th>Latest project</th><th>Data</th><th>Design</th><th>Blocks</th><th></th></tr></thead><tbody>
-      ${state.members.length?state.members.map(m=>{const p=projectByUid.get(m.uid||m.id);return `<tr><td>${escapeHtml(m.displayName||'Pupil')}</td><td>${escapeHtml(m.email||'')}</td><td>${projectCountByUid.get(m.uid||m.id)||0}</td><td>${escapeHtml(p?.name||'Not started')}</td><td>${p?p.records?.length||0:'—'}</td><td>${p?p.components?.length||0:'—'}</td><td>${p?p.program?.length||0:'—'}</td><td><button class="btn small" data-remove-member="${escapeAttr(m.uid||m.id)}">Remove</button></td></tr>`}).join(''):'<tr><td colspan="8"><div class="empty-note">No pupils have joined yet. Give them class code <b>'+escapeHtml(cls?.joinCode||'')+'</b>.</div></td></tr>'}
+      <table class="class-table"><thead><tr><th>Pupil</th><th>Email</th><th>Apps</th><th>Latest project</th><th>Data</th><th>Design</th><th>Blocks</th><th>Block support</th><th></th></tr></thead><tbody>
+      ${state.members.length?state.members.map(m=>{const p=projectByUid.get(m.uid||m.id);const mode=m.blockSupportMode==='auto'?'auto':'manual';return `<tr><td>${escapeHtml(m.displayName||'Pupil')}</td><td>${escapeHtml(m.email||'')}</td><td>${projectCountByUid.get(m.uid||m.id)||0}</td><td>${escapeHtml(p?.name||'Not started')}</td><td>${p?p.records?.length||0:'—'}</td><td>${p?p.components?.length||0:'—'}</td><td>${p?p.program?.length||0:'—'}</td><td><select class="member-support-select" data-block-support="${escapeAttr(m.uid||m.id)}"><option value="manual" ${mode==='manual'?'selected':''}>Tutorial — pupil builds blocks</option><option value="auto" ${mode==='auto'?'selected':''}>Auto-add support blocks</option></select></td><td><button class="btn small" data-remove-member="${escapeAttr(m.uid||m.id)}">Remove</button></td></tr>`}).join(''):'<tr><td colspan="9"><div class="empty-note">No pupils have joined yet. Give them class code <b>'+escapeHtml(cls?.joinCode||'')+'</b>.</div></td></tr>'}
       </tbody></table>
     </div>
   </main></div>`;
@@ -388,43 +391,45 @@ ${state.project.tutorialEnabled===false?'':tutorialPanel()}
 
 function tutorialSteps(){
   const fields=state.project.fields||[], records=state.project.records||[], comps=state.project.components||[], program=state.project.program||[];
+  const pages=state.project.pages||[];
   const lists=comps.filter(c=>c.type==='list');
   const configuredList=lists.find(c=>(!c.listLayout?.includes('image')||c.listImageField)&&(!c.listLayout?.includes('title')||c.listTitleField)&&(!c.listLayout?.includes('subtitle')||c.listSubtitleField));
-  const hasSecondPage=(state.project.pages||[]).length>=2;
-  const listNavigates=lists.some(c=>c.navigateToPage);
-  const detailPageIds=new Set(lists.map(c=>c.navigateToPage).filter(Boolean));
-  const detailComponents=comps.filter(c=>detailPageIds.has(c.pageId)&&['label','image'].includes(c.type));
+  const hasSecondPage=pages.length>=2;
+  const nonHomePages=new Set(pages.slice(1).map(p=>p.id));
+  const detailComponents=comps.filter(c=>nonHomePages.has(c.pageId)&&['label','image','input'].includes(c.type));
+  const hasDetailDesign=detailComponents.length>=1;
   const detailConnected=detailComponents.length>0&&detailComponents.some(c=>program.some(b=>b.type==='set_field'&&b.target===c.id));
   const listEvent=program.some(b=>b.type==='event_list_click');
-  const navBlock=program.some(b=>b.type==='navigate_page');
+  const navBlock=program.some(b=>b.type==='navigate_page'&&nonHomePages.has(b.page));
+  const assisted=autoBlocksEnabled();
   return [
     {tab:'data',title:'Name your app and database',done:state.project.name!=='My New App'&&state.project.tableName!=='MyData',
       text:'Choose your own app idea. Give the app a name, then name the database table that will hold its information.',
       tip:'Examples: Songs, Films, Players, Recipes, Animals or Places.'},
     {tab:'data',title:'Create your fields',done:fields.length>=3,
-      text:'Create at least three database fields. Think about what you want each item in your list to show.',
+      text:'Create at least three database fields. Think about what you want each item in your list and details page to show.',
       tip:'A useful list often has an ID, a title/name, a subtitle/category and an image field.'},
     {tab:'data',title:'Add your records',done:records.length>=3,
       text:'Add at least three different records. These rows will become the items in your app list.',
-      tip:'Try to use real-looking different data so you can tell whether the list and details page are working.'},
+      tip:'Use different-looking data so you can tell whether the selected record is changing correctly.'},
     {tab:'design',title:'Build a scrollable list on Page 1',done:!!configuredList,
       text:'Add a Database List. Choose its row layout, then choose which database fields supply the image, title and subtitle.',
-      tip:'You can use Image only, Image + Title, Image + Title + Subtitle, Title + Subtitle, or Title only.'},
+      tip:'The list itself is data-bound in Design. Programming decides what happens when somebody taps a row.'},
     {tab:'design',title:'Create a second page',done:hasSecondPage,
-      text:'Click + Add page and name it something like Details. This page will show more information about the item the user taps.',
-      tip:'Apps can now have several pages. Use the page tabs above the phone to switch between them while designing.'},
-    {tab:'design',title:'Design the details page',done:detailConnected,
-      text:'On your second page add labels/images and connect them to database fields with Connect Data.',
-      tip:'Because the tapped list row becomes the current record, these components will show the correct item.'},
-    {tab:'design',title:'Make the list open the details page',done:listNavigates&&listEvent&&navBlock,
-      text:'Select the List on Page 1 and choose your Details page under “When a row is tapped”. DataApp Studio creates the Blockly event and navigation block.',
-      tip:'Then open Blocks to inspect what was created: WHEN an item is tapped → GO TO Details.'},
-    {tab:'blocks',title:'Inspect the navigation blocks',done:listEvent&&navBlock,
-      text:'Look at the Blockly workspace. The list tap event is real code logic: the clicked row becomes the current record, then the app navigates to another page.',
-      tip:'You can also add button navigation or a Go back block.'},
-    {tab:'test',title:'Test the list and details page',done:state.tutorialTested===true,
-      text:'Run the app, scroll the list, tap different rows and check that the details page changes to match the selected record.',
-      tip:'Try the first, middle and last row so you know the selected record is being carried between pages.'}
+      text:'Click + Add page and name it something like Details. You only build this page once.',
+      tip:'The same Details page is reused for every database row, so an app with two designed pages can feel like it has dozens.'},
+    {tab:'design',title:'Design the reusable Details page',done:hasDetailDesign,
+      text:'Add the placeholders you need on the second page: headings, labels, images or other components.',
+      tip:'Do not make one page per record. These placeholders will be filled from whichever list row the user selects.'},
+    {tab:assisted?'design':'blocks',title:'Connect the Details placeholders to the selected record',done:detailConnected,
+      text:assisted?'Your teacher has enabled Auto-add support. You may use Auto-connect Data on a placeholder, then inspect the Blockly it creates.':'Open Blocks. Use “when Details opens” and Screen blocks to set each placeholder from a field in the selected record.',
+      tip:assisted?'Auto-add is support, not magic: open Blocks and read what it generated.':'For example: WHEN Details opens → SET TeamName TO Team Name FROM selected record.'},
+    {tab:assisted?'design':'blocks',title:'Program the list tap',done:listEvent&&navBlock,
+      text:assisted?'Your teacher has enabled Auto-add support, so choosing a destination page on the List can create the starter Blockly.':'Build it yourself in Blockly: Events → “when an item in List is tapped”, then Navigation → “go to Details”.',
+      tip:'The tapped row automatically becomes the selected record before the Details page opens.'},
+    {tab:'test',title:'Test several different records',done:state.tutorialTested===true,
+      text:'Run the app, scroll the list, tap different rows and check that the same Details page fills with different data each time.',
+      tip:'Try the first, middle and last row. Then add a Back button and program it with Navigation → go back.'}
   ];
 }
 function tutorialPanel(){
@@ -475,13 +480,14 @@ function designView(){
     <div class="page-tabs">${state.project.pages.map((p,i)=>`<button class="page-tab ${p.id===state.currentPageId?'active':''}" data-page-select="${p.id}"><span>${escapeHtml(p.name)}</span><small>Page ${i+1}</small></button>`).join('')}</div>
     <div class="page-actions"><button class="btn small" data-action="rename-page">Rename</button><button class="btn small" data-action="add-page">+ Add page</button>${state.project.pages.length>1?'<button class="btn small danger-text" data-action="delete-page">Delete page</button>':''}</div>
   </div>
-  <div class="notice master-detail-note"><b>List → details pattern:</b> Put a List on one page, choose which database fields make its image/title/subtitle, then set <b>On tap → another page</b>. DataApp Studio creates the Blockly navigation event for you. The tapped row becomes the current record.</div>
+  <div class="notice master-detail-note"><b>List → Details pattern:</b> Put a List on Home and design one reusable Details page. ${autoBlocksEnabled()?'Your teacher has enabled Auto-add support, so Design shortcuts can create starter Blockly for you.':'Programming stays in Blocks: you decide what happens when the user taps a row.'} The tapped row becomes the <b>selected record</b>.</div>
   <div class="design-grid">
   <aside class="toolbox"><h3>Components</h3>${[['label','🔤','Text / Label'],['image','🖼️','Image'],['button','🔘','Button'],['input','⌨️','Text box'],['list','☷','Database List']].map(c=>`<button class="component-btn" data-add-component="${c[0]}"><span>${c[1]}</span><span>${c[2]}</span></button>`).join('')}<div class="empty-note" style="margin-top:14px"><b>Selected page:</b><br>${escapeHtml(pg?.name||'Page')}</div></aside>
   <section class="workspace-panel"><div class="device-wrap"><div class="device-switch">${[['phone','Phone'],['large','Large phone'],['tablet','Tablet']].map(d=>`<button data-device="${d[0]}" class="${state.device===d[0]?'active':''}">${d[1]}</button>`).join('')}</div>${phoneMarkup('design')}</div></section>
   <aside class="properties">${propertiesMarkup()}</aside>
   </div>`;
 }
+function autoBlocksEnabled(){return state.blockSupportMode==='auto';}
 function propertiesMarkup(){
   const c=state.project.components.find(x=>x.id===state.selectedComponent);
   if(!c) return `<h3>Properties</h3><div class="empty-note">Click a component on ${escapeHtml(currentPage()?.name||'this page')} to change its properties.</div>`;
@@ -492,7 +498,8 @@ function propertiesMarkup(){
   ${c.type==='label'?`<div class="prop-group"><label>Font size</label><input data-prop="fontSize" type="number" min="10" max="48" value="${c.fontSize||16}"></div><div class="prop-group"><label>Alignment</label><select data-prop="align"><option ${c.align==='left'?'selected':''}>left</option><option ${c.align==='center'?'selected':''}>center</option><option ${c.align==='right'?'selected':''}>right</option></select></div>`:''}
   ${c.type==='list'?listPropertiesMarkup(c):''}
   <div class="prop-group"><label>Width</label><input data-prop="w" type="number" value="${c.w}"></div><div class="prop-group"><label>Height</label><input data-prop="h" type="number" value="${c.h}"></div>
-  ${['label','image','input'].includes(c.type)?`<button class="btn connect" style="width:100%;margin-bottom:8px" data-action="connect-data">🔗 Connect Data</button><div class="connection-note">${connectionsFor(c.id)}</div>`:''}
+  ${['label','image','input'].includes(c.type)?(autoBlocksEnabled()?`<button class="btn connect" style="width:100%;margin-bottom:8px" data-action="connect-data">✨ Auto-connect Data</button><div class="connection-note">${connectionsFor(c.id)}</div>`:`<button class="btn connect" style="width:100%;margin-bottom:8px" data-program-component="${escapeAttr(c.id)}" data-program-kind="data">🧩 Program data in Blocks</button><div class="connection-note">${connectionsFor(c.id)} You add the Blockly yourself.</div>`):''}
+  ${c.type==='button'?`<button class="btn connect" style="width:100%;margin-bottom:8px" data-program-component="${escapeAttr(c.id)}" data-program-kind="button">🧩 Tell ${escapeHtml(c.name)} what to do</button><div class="connection-note">Buttons only act when you program a <b>when ${escapeHtml(c.name)} clicked</b> event in Blocks.</div>`:''}
   <button class="btn small" style="width:100%;color:var(--danger)" data-action="delete-component">Delete component</button>`
 }
 function listPropertiesMarkup(c){
@@ -512,8 +519,7 @@ function listPropertiesMarkup(c){
     ${needsImage?`<div class="prop-group"><label>Image field</label><select data-list-prop="listImageField">${fieldOptionsHtml(c.listImageField,'image')}</select></div>`:''}
     ${needsTitle?`<div class="prop-group"><label>Title field</label><select data-list-prop="listTitleField">${fieldOptionsHtml(c.listTitleField,'text')}</select></div>`:''}
     ${needsSubtitle?`<div class="prop-group"><label>Subtitle field</label><select data-list-prop="listSubtitleField">${fieldOptionsHtml(c.listSubtitleField,'text')}</select></div>`:''}
-    <div class="prop-group"><label>When a row is tapped</label><select data-list-prop="navigateToPage">${pageOptionsHtml(c.navigateToPage,c.pageId)}</select></div>
-    <div class="connection-note">${c.navigateToPage?`Tap → <b>${escapeHtml(pageName(c.navigateToPage))}</b>. The clicked row becomes the current record.`:'Choose a destination page to make the list open a details page.'}</div>
+    ${autoBlocksEnabled()?`<div class="prop-group"><label>When a row is tapped</label><select data-list-prop="navigateToPage">${pageOptionsHtml(c.navigateToPage,c.pageId)}</select></div><div class="connection-note">${c.navigateToPage?`Tap → <b>${escapeHtml(pageName(c.navigateToPage))}</b>. Auto support will add the Blockly navigation.`:'Choose a destination page and Auto support will create the list-tap blocks.'}</div>`:`<button class="btn connect" style="width:100%;margin-top:8px" data-program-component="${escapeAttr(c.id)}" data-program-kind="list">🧩 Program what happens when a row is tapped</button><div class="connection-note">The tapped row automatically becomes the <b>selected record</b>, but you must add the Blockly event and navigation yourself.</div>`}
   </div>`;
 }
 function phoneMarkup(mode='design'){
@@ -548,9 +554,20 @@ function componentMarkup(c,mode){
   return `<div class="screen-component ${sel}" ${attrs} style="${style}">${inner}</div>`;
 }
 
-function blocksView(){return `<div class="section-head"><div><h2>Make it work with real Blockly</h2><p>Drag snap-together blocks from the toolbox. Put action blocks inside an event block.</p></div><button class="btn good" data-tab="test">▶ Run app</button></div>
-<div class="blockly-layout"><section class="blockly-card"><div class="blockly-help"><b>How it connects:</b> <span>Events decide <i>when</i>. A list tap automatically selects that record. Screen blocks display fields, and Navigation blocks move between pages.</span></div><div id="blocklyDiv" class="blockly-workspace"></div></section>
-<aside class="code-panel blockly-code"><div style="display:flex;justify-content:space-between;align-items:center"><h3>Show code</h3><span class="tag">Live</span></div><div class="code-toggle"><button data-code-mode="python" class="${state.codeMode==='python'?'active':''}">Python idea</button><button data-code-mode="plain" class="${state.codeMode==='plain'?'active':''}">Plain English</button></div><div class="codebox" id="generatedCode">${escapeHtml(generateCode())}</div><div class="mini-checks">${checklistBadges()}</div><div class="notice" style="margin-top:12px">Tip: the <b>Connect Data</b> button can create the first connection for you, then you can inspect the Blockly stack and build the next one yourself.</div></aside></div>`}
+function blockTutorialCard(){
+  const c=state.project.components.find(x=>x.id===state.selectedComponent);
+  const kind=state.blockTutorial||'overview';
+  const name=escapeHtml(c?.name||'your component');
+  let title='Build the blocks yourself',body=`Choose the kind of help you need. Nothing is inserted into the workspace unless your teacher has turned on Auto-add support for you.`;
+  if(kind==='button') {title=`Program ${name}`;body=`<ol><li>Open <b>Events</b> and drag <b>when … clicked</b> onto the workspace.</li><li>Choose <b>${name}</b> in its dropdown.</li><li>Open the category for the action you want. For example, use <b>Navigation → go to</b> to open another page, or <b>go back</b> for a Back button.</li><li>Snap the action block inside the event's <b>do</b> section.</li><li>Press <b>Run app</b> and click the button to test it.</li></ol>`;}
+  if(kind==='list') {title='Program the list tap';body=`<ol><li>Open <b>Events</b> and drag <b>when an item in … is tapped</b>.</li><li>Choose your List in the dropdown.</li><li>The row the user taps automatically becomes the <b>selected record</b>.</li><li>Open <b>Navigation</b>, drag <b>go to</b> inside the event, and choose your Details page.</li><li>Test by tapping several different list rows.</li></ol>`;}
+  if(kind==='data') {title=`Show database data in ${name}`;body=`<ol><li>Open <b>Events</b> and drag <b>when [Details] opens</b>.</li><li>Open <b>Screen</b> and drag <b>set … to … from selected record</b> inside it.</li><li>Choose <b>${name}</b> as the component.</li><li>Choose the database field it should display.</li><li>Repeat with the other placeholders on the Details page.</li></ol>`;}
+  return `<div class="block-tutorial-card"><div class="block-tutorial-head"><div><span class="tag ${autoBlocksEnabled()?'tag-good':''}">${autoBlocksEnabled()?'✨ Auto-add support ON':'🧩 You build the blocks'}</span><h3>${title}</h3></div></div><div class="block-help-tabs"><button class="btn small ${kind==='button'?'primary':''}" data-block-help="button">Button</button><button class="btn small ${kind==='list'?'primary':''}" data-block-help="list">List → Details</button><button class="btn small ${kind==='data'?'primary':''}" data-block-help="data">Details placeholders</button></div><div class="block-tutorial-body">${body}</div></div>`;
+}
+function blocksView(){return `<div class="section-head"><div><h2>Make it work with real Blockly</h2><p>Events say <i>when</i> something happens. Snap the action you want inside the event.</p></div><button class="btn good" data-tab="test">▶ Run app</button></div>
+${blockTutorialCard()}
+<div class="blockly-layout"><section class="blockly-card"><div class="blockly-help"><b>Remember:</b> <span>A list tap chooses the selected database record. Screen blocks display fields from it, and Navigation blocks move between pages.</span></div><div id="blocklyDiv" class="blockly-workspace"></div></section>
+<aside class="code-panel blockly-code"><div style="display:flex;justify-content:space-between;align-items:center"><h3>Show code</h3><span class="tag">Live</span></div><div class="code-toggle"><button data-code-mode="python" class="${state.codeMode==='python'?'active':''}">Python idea</button><button data-code-mode="plain" class="${state.codeMode==='plain'?'active':''}">Plain English</button></div><div class="codebox" id="generatedCode">${escapeHtml(generateCode())}</div><div class="mini-checks">${checklistBadges()}</div><div class="notice" style="margin-top:12px">${autoBlocksEnabled()?'Your teacher has enabled <b>Auto-add block support</b>. Design shortcuts may create starter blocks for you. You can still change them yourself.':'Design shortcuts will <b>not</b> create Blockly for you. Use the tutorial above and build the blocks yourself.'}</div></aside></div>`}
 
 function programMarkup(){
   if(!state.project.program.length) return `<div class="hint">Click a block in the toolbox to start.</div>`;
@@ -563,7 +580,7 @@ function blockMarkup(b){
   if(b.type==='event_click') return `<div class="program-block event" data-block-id="${b.id}">when <select data-block-prop="component">${optionsComponents(b.component,['button'])}</select> clicked <span class="block-move"><button class="move-block" data-dir="-1">↑</button><button class="move-block" data-dir="1">↓</button></span><button class="remove-block">✕</button></div>`;
   if(b.type==='next_record') return `<div class="program-block data" data-block-id="${b.id}">🗃 get next record <span class="block-move"><button class="move-block" data-dir="-1">↑</button><button class="move-block" data-dir="1">↓</button></span><button class="remove-block">✕</button></div>`;
   if(b.type==='prev_record') return `<div class="program-block data" data-block-id="${b.id}">🗃 get previous record <span class="block-move"><button class="move-block" data-dir="-1">↑</button><button class="move-block" data-dir="1">↓</button></span><button class="remove-block">✕</button></div>`;
-  if(b.type==='set_field') return `<div class="program-block screenb" data-block-id="${b.id}">set <select data-block-prop="target">${optionsComponents(b.target)}</select> to <select data-block-prop="field">${optionsFields(b.field)}</select> from current record <span class="block-move"><button class="move-block" data-dir="-1">↑</button><button class="move-block" data-dir="1">↓</button></span><button class="remove-block">✕</button></div>`;
+  if(b.type==='set_field') return `<div class="program-block screenb" data-block-id="${b.id}">set <select data-block-prop="target">${optionsComponents(b.target)}</select> to <select data-block-prop="field">${optionsFields(b.field)}</select> from selected record <span class="block-move"><button class="move-block" data-dir="-1">↑</button><button class="move-block" data-dir="1">↓</button></span><button class="remove-block">✕</button></div>`;
   return '';
 }
 
@@ -674,6 +691,15 @@ function bindCommon(){
   const newAssignment=$('[data-action="new-assignment"]'); if(newAssignment)newAssignment.onclick=showAssignmentModal;
   const manageBank=$('[data-action="manage-bank"]'); if(manageBank)manageBank.onclick=showBankManager;
   const regen=$('[data-action="regenerate-code"]'); if(regen)regen.onclick=async()=>{if(!state.currentClassId)return;if(!confirm('Generate a new class code? The old code will stop working.'))return;try{const code=CLOUD_MODE?await regenerateJoinCode(state.currentClassId):'DEMO'+Math.floor(10+Math.random()*89);state.currentClass.joinCode=code;const c=state.classes.find(x=>x.id===state.currentClassId);if(c)c.joinCode=code;render()}catch(err){alert(err.message)}};
+  $$('[data-block-support]').forEach(sel=>sel.onchange=async()=>{
+    const uid=sel.dataset.blockSupport,mode=sel.value==='auto'?'auto':'manual';
+    sel.disabled=true;
+    try{
+      if(CLOUD_MODE)await updateClassMemberSettings(state.currentClassId,uid,{blockSupportMode:mode});
+      const member=state.members.find(m=>(m.uid||m.id)===uid);if(member)member.blockSupportMode=mode;
+    }catch(err){alert(friendlyFirebaseError(err));render();return}
+    sel.disabled=false;
+  });
   $$('[data-remove-member]').forEach(b=>b.onclick=async()=>{const uid=b.dataset.removeMember;if(!confirm('Remove this pupil from the class? Their saved project will not be deleted.'))return;try{if(CLOUD_MODE)await removeClassMember(state.currentClassId,uid);state.members=state.members.filter(m=>(m.uid||m.id)!==uid);render()}catch(err){alert(err.message)}});
 }
 function bindBuilder(){
@@ -835,11 +861,17 @@ function bindDesign(){
     saveProject();render();
   });
   $$('[data-device]').forEach(btn=>btn.onclick=()=>{state.device=btn.dataset.device;render()});
+  $$('[data-program-component]').forEach(btn=>btn.onclick=()=>{
+    state.selectedComponent=btn.dataset.programComponent||state.selectedComponent;
+    state.blockTutorial=btn.dataset.programKind||'overview';
+    state.tab='blocks';render();
+  });
   const chooseImage=$('[data-action="choose-component-image"]');if(chooseImage)chooseImage.onclick=()=>{const c=state.project.components.find(x=>x.id===state.selectedComponent);showMediaPicker({title:`Choose image for ${c.name}`,selected:c.src,onSelect:ref=>{c.src=ref;saveProject();render()}})};
   const connect=$('[data-action="connect-data"]');if(connect)connect.onclick=showConnectModal;
   const del=$('[data-action="delete-component"]');if(del)del.onclick=()=>{const id=state.selectedComponent;state.project.components=state.project.components.filter(c=>c.id!==id);pruneProgram(new Set([id]));state.selectedComponent=null;saveProject();render()};
 }
 function connectListNavigation(c){
+  if(!autoBlocksEnabled())return;
   const kept=[];let skipping=false;
   for(const b of state.project.program){
     if(['event_open','event_click','event_list_click'].includes(b.type)){
@@ -856,6 +888,7 @@ function connectListNavigation(c){
 }
 
 function bindBlocks(){
+  $$('[data-block-help]').forEach(b=>b.onclick=()=>{state.blockTutorial=b.dataset.blockHelp||'overview';render()});
   const host=$('#blocklyDiv');
   if(host){
     requestAnimationFrame(async()=>{
@@ -946,6 +979,7 @@ function showAssignmentModal(){
 }
 function showConnectModal(){
   const c=state.project.components.find(x=>x.id===state.selectedComponent); if(!c)return;
+  if(!autoBlocksEnabled()){state.blockTutorial='data';state.tab='blocks';render();return;}
   const compatible=state.project.fields.filter(f=>c.type==='image'?f.type==='image':f.type!=='image');
   const fields=compatible.length?compatible:state.project.fields;
   const wrap=document.createElement('div');wrap.className='modal-backdrop';
@@ -1006,7 +1040,7 @@ function bindTest(){
   });
   $$('.screen-component[data-test-component] [data-list-index]').forEach(row=>row.onclick=()=>{
     const host=row.closest('[data-test-component]'),id=host?.dataset.testComponent,index=Number(row.dataset.listIndex);if(!id||Number.isNaN(index))return;
-    state.currentRecord=index;log(`${nameOfComponent(id)} row ${index+1} tapped → current record ${index+1}`,'good');
+    state.currentRecord=index;log(`${nameOfComponent(id)} row ${index+1} tapped → selected record ${index+1}`,'good');
     runEvent('list_click',id,{pageId:state.currentPageId,index});
     render();
   });
@@ -1038,7 +1072,7 @@ function applyField(targetId,fieldId){
   if(!c||!f||!r){log('A block is missing a component or field.','warn');return}
   const value=r[fieldId]??'';
   if(c.type==='image') c.src=String(value); else if(c.type!=='list') c.text=String(value);
-  log(`${c.name} ← ${f.name} from current record`,'good');
+  log(`${c.name} ← ${f.name} from selected record`,'good');
 }
 function applyText(targetId,text){const c=state.project.components.find(x=>x.id===targetId);if(!c){log('A text block is missing its component.','warn');return}if(c.type!=='image'&&c.type!=='list')c.text=String(text||'');log(`${c.name} text updated`,'good')}
 function log(text,kind=''){state.testLogs.push({text,kind});if(state.testLogs.length>18)state.testLogs.shift()}
@@ -1048,7 +1082,7 @@ function generateCode(){
     return state.project.program.map(b=>{
       if(b.type==='event_open')return `WHEN ${pageName(b.page||state.project.pages[0]?.id)} opens:`;
       if(b.type==='event_click')return `WHEN ${nameOfComponent(b.component)} is clicked:`;
-      if(b.type==='event_list_click')return `WHEN an item in ${nameOfComponent(b.component)} is tapped:  (that row becomes the current record)`;
+      if(b.type==='event_list_click')return `WHEN an item in ${nameOfComponent(b.component)} is tapped:  (that row becomes the selected record)`;
       if(b.type==='first_record')return '    Move to the first database record';
       if(b.type==='next_record')return '    Move to the next database record';
       if(b.type==='prev_record')return '    Move to the previous database record';
@@ -1132,9 +1166,10 @@ async function loadSelectedClassData(doRender=true){
         cloudListAssignments(state.currentClassId),listClassMembers(state.currentClassId),listClassProjects(state.currentClassId)
       ]);
     }else{
-      [state.assignments,state.cloudProjects]=await Promise.all([
-        cloudListAssignments(state.currentClassId),listMyProjects(state.user,state.currentClassId)
+      [state.assignments,state.cloudProjects,state.pupilMember]=await Promise.all([
+        cloudListAssignments(state.currentClassId),listMyProjects(state.user,state.currentClassId),getClassMember(state.currentClassId,state.user.uid)
       ]);
+      state.blockSupportMode=state.pupilMember?.blockSupportMode==='auto'?'auto':'manual';
       state.cloudProjects=sortProjects(state.cloudProjects.filter(p=>!isLegacyDemoProject(p)));
       if(state.cloudProjects.length){
         const clean=cleanCloudProject(state.cloudProjects[0]);

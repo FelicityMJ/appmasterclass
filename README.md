@@ -1,7 +1,22 @@
-# DataApp Studio — classroom V1.6
+# DataApp Studio — classroom V1.8
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.6 keeps the real Blockly + Android publishing foundation and adds multi-page apps plus Thunkable-style database lists with master/detail navigation.
+A child-friendly database + app builder aimed at roughly age 12–13. V1.8 keeps the multi-app, multi-page, Blockly and Android publishing foundation and adds teacher-controlled block support so pupils can build programming themselves with tutorials.
 
+
+
+## New in V1.8
+
+- pupils build Blockly themselves by default; Design no longer silently inserts programming for them;
+- every class pupil has a teacher-controlled **Block support** setting;
+- **Tutorial — pupil builds blocks** is the default;
+- **Auto-add support blocks** can be switched on for individual pupils who need more scaffolding;
+- buttons now show a clear **Tell this button what to do** route into the Blockly tutorial;
+- List navigation and database placeholder connections only auto-create blocks when that pupil has Auto-add support enabled;
+- contextual Blockly tutorials explain button clicks, List → Details navigation and Details-page placeholders;
+- wording now uses **selected record** for the row chosen from a List;
+- no Firestore or Storage rule change is needed from V1.7 because class owners already have permission to update their member records.
+
+See `UPDATE-V1.8.md` when upgrading an already connected V1.7 site.
 
 ## New in V1.7
 

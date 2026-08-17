@@ -172,6 +172,24 @@ export async function listClassMembers(classId){
   return snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>String(a.displayName).localeCompare(String(b.displayName)));
 }
 
+export async function getClassMember(classId, uid){
+  const s=await initFirebaseServices();
+  if(!s||!classId||!uid) return null;
+  const snap=await s.dbSdk.getDoc(s.dbSdk.doc(s.db,'classes',classId,'members',uid));
+  return snap.exists()?{id:snap.id,...snap.data()}:null;
+}
+
+export async function updateClassMemberSettings(classId, uid, patch={}){
+  const s=await initFirebaseServices();
+  if(!s) throw new Error('Firebase is not enabled.');
+  if(!classId||!uid) throw new Error('Choose a pupil first.');
+  const allowed={};
+  if(patch.blockSupportMode==='auto'||patch.blockSupportMode==='manual') allowed.blockSupportMode=patch.blockSupportMode;
+  if(!Object.keys(allowed).length) return;
+  allowed.updatedAt=s.dbSdk.serverTimestamp();
+  await s.dbSdk.updateDoc(s.dbSdk.doc(s.db,'classes',classId,'members',uid),allowed);
+}
+
 export async function removeClassMember(classId, uid){
   const s=await initFirebaseServices();
   if(!s) throw new Error('Firebase is not enabled.');
