@@ -1,9 +1,15 @@
-# DataApp Studio — classroom V1.11
+# DataApp Studio — classroom V1.12
 
 A child-friendly database + app builder aimed at roughly age 12–13. V1.9 keeps the multi-app, multi-page, Blockly and Android publishing foundation and adds teacher-controlled block support so pupils can build programming themselves with tutorials.
 
 
 
+
+## New in V1.12
+
+- published page background now fills the entire installed-app viewport, including below the scaled design canvas;
+- Database List components can use a **Transparent list background** option;
+- transparent lists let the page background show through the container and rows in Design, Test and published Android/PWA apps.
 
 ## New in V1.11
 

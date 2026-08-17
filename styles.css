@@ -117,3 +117,10 @@ button{cursor:pointer}
 
 /* V1.10 interaction fixes */
 .move-handle{position:absolute;left:50%;top:-27px;transform:translateX(-50%);width:30px;height:22px;border:2px solid #fff;border-radius:8px;background:#6b55e8;color:#fff;display:grid;place-items:center;font-size:15px;font-weight:900;line-height:1;z-index:31;cursor:grab;box-shadow:0 2px 7px rgba(40,30,100,.25);touch-action:none;user-select:none}.move-handle:active{cursor:grabbing}.screen-component.selected{z-index:20}
+
+/* V1.12 list transparency */
+.screen-component .database-list.transparent-list{background:transparent}
+.screen-component .database-list.transparent-list .data-list-row{background:transparent}
+.screen-component .database-list.transparent-list .data-list-row:hover{background:rgba(255,255,255,.10)}
+.screen-component .database-list.transparent-list .list-row-image{background:rgba(255,255,255,.18)}
+.check-row small{display:block;color:var(--muted);font-weight:500;margin-top:3px}

@@ -50,6 +50,7 @@ function normaliseProject() {
       component.listImageField = component.listImageField || '';
       component.listTitleField = component.listTitleField || '';
       component.listSubtitleField = component.listSubtitleField || '';
+      component.listTransparent = Boolean(component.listTransparent);
       component.navigateToPage = component.navigateToPage || '';
     }
   }
@@ -186,7 +187,7 @@ function componentMarkup(component) {
   }
   if (component.type === 'image') inner = `<img src="${attr(component.src || '')}" alt="">`;
   if (component.type === 'input') inner = `<input style="background:${attr(component.backgroundColor || '#ffffff')};color:${textColour}" placeholder="${attr(component.text || 'Type here...')}">`;
-  if (component.type === 'list') inner = `<div class="listbox database-list">${listRowsMarkup(component)}</div>`;
+  if (component.type === 'list') inner = `<div class="listbox database-list ${component.listTransparent ? 'transparent-list' : ''}">${listRowsMarkup(component)}</div>`;
   return `<div class="public-component" data-component="${attr(component.id)}" style="${style}">${inner}</div>`;
 }
 
@@ -197,15 +198,18 @@ function componentsOnPage() {
 function render() {
   document.title = published.appName || project.name || 'My App';
   root.className = '';
-  root.innerHTML = `<div class="public-shell">
+  const pageBackground = project.pages.find(page => page.id === currentPageId)?.backgroundColor || '#ffffff';
+  document.documentElement.style.background = pageBackground;
+  document.body.style.background = pageBackground;
+  root.innerHTML = `<div class="public-shell" style="background:${attr(pageBackground)}">
     <header class="public-topbar">
       <div class="public-brand"><img src="${attr(published.icon192 || published.icon512 || '')}" alt=""><span>${esc(published.appName || project.name)}</span></div>
       <div class="public-actions"><button class="public-btn" data-share>Share</button><button class="public-btn primary" data-install>Install app</button></div>
     </header>
-    <section class="public-stage">
+    <section class="public-stage" style="background:${attr(pageBackground)}">
       <div class="public-canvas-wrap" data-canvas-wrap>
         <div class="public-device" data-canvas>
-          <div class="public-screen" style="background:${attr(project.pages.find(page => page.id === currentPageId)?.backgroundColor || '#ffffff')}" data-page="${attr(currentPageId)}">
+          <div class="public-screen" style="background:${attr(pageBackground)}" data-page="${attr(currentPageId)}">
             ${componentsOnPage().map(componentMarkup).join('')}
           </div>
         </div>
