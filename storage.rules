@@ -1,0 +1,34 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function isSmallImage() {
+      return request.resource != null
+        && request.resource.contentType.matches('image/.*')
+        && request.resource.size < 150 * 1024;
+    }
+
+    // Optimised pupil uploads only. The 20-image quota should also be checked
+    // transactionally in Firestore / trusted server code; Storage Rules enforce
+    // ownership, file type and hard file size.
+    match /users/{uid}/images/{imageId} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid && isSmallImage();
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Shared bank. In production, teacher/admin permission should be represented
+    // by a trusted role/claim or a server-side write path. Pupils may read.
+    match /imageBank/{imageId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // Published app icons are stored separately from the pupil's 20-image quota.
+    match /users/{uid}/appIcons/{projectId}/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == uid && isSmallImage();
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+  }
+}
