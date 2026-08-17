@@ -1,9 +1,21 @@
-# DataApp Studio — classroom V1.10
+# DataApp Studio — classroom V1.11
 
 A child-friendly database + app builder aimed at roughly age 12–13. V1.9 keeps the multi-app, multi-page, Blockly and Android publishing foundation and adds teacher-controlled block support so pupils can build programming themselves with tutorials.
 
 
 
+
+## New in V1.11
+
+- published Android apps now render against the same 320×630 logical canvas as the builder and scale to the real device, preserving layout and alignment;
+- centred/right-aligned labels render consistently in the published app;
+- published-app debug/status toasts are removed;
+- cached published apps render immediately on launch while Firestore refreshes quietly in the background;
+- service-worker/manifest setup no longer blocks the first visible app screen;
+- PWA splash background follows the first app page colour;
+- optional `public-host.js` lets QR/install links point at Firebase Hosting or a custom branded domain rather than the GitHub Pages address.
+
+See `UPDATE-V1.11.md`.
 
 ## New in V1.10
 

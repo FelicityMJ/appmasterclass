@@ -1,4 +1,4 @@
-const CACHE='dataapp-published-v1-9';
+const CACHE='dataapp-published-v1-11';
 const SHELL=['./published.html','./published.css','./public-app.js','./firebase-config.js'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).catch(()=>{}));self.skipWaiting();});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{for(const k of await caches.keys())if(k!==CACHE)await caches.delete(k);await self.clients.claim();})());});
@@ -11,7 +11,7 @@ self.addEventListener('fetch',event=>{
       id:`./published.html?id=${encodeURIComponent(url.searchParams.get('id')||'')}`,
       start_url:`./published.html?id=${encodeURIComponent(url.searchParams.get('id')||'')}`,
       scope:'./',display:'standalone',
-      background_color:'#ffffff',
+      background_color:url.searchParams.get('bg')||'#ffffff',
       theme_color:url.searchParams.get('theme')||'#6256df',
       orientation:url.searchParams.get('orientation')||'any',
       icons:[
