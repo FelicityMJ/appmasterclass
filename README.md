@@ -1,6 +1,6 @@
-# DataApp Studio — classroom V1.3
+# DataApp Studio — classroom V1.5
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.3 connects the classroom shell to real Firebase Authentication, Cloud Firestore and Cloud Storage while retaining a local preview mode until Firebase is enabled.
+A child-friendly database + app builder aimed at roughly age 12–13. V1.5 keeps the V1.4 blank-canvas tutorial and adds real Blockly visual programming plus public installable pupil apps with QR codes.
 
 ## Pupil workflow
 
@@ -11,7 +11,7 @@ A child-friendly database + app builder aimed at roughly age 12–13. V1.3 conne
 5. **DESIGN** — add labels, images, buttons, text boxes and lists.
 6. **BLOCKS** — use a deliberately small Scratch-like visual programming set.
 7. **TEST** — run the app and use the friendly debugger.
-8. **PUBLISH** — choose future installed-app name, orientation and icon.
+8. **PUBLISH** — choose the installed-app name/icon, publish an unlisted snapshot, scan its QR code and install it on Android.
 
 ## Teacher workflow
 
@@ -22,6 +22,38 @@ A child-friendly database + app builder aimed at roughly age 12–13. V1.3 conne
 5. See real enrolled pupils and their saved project summaries.
 6. Add curriculum-safe images to the shared Image Bank.
 7. Regenerate a join code or remove a pupil when needed.
+
+
+## New in V1.5
+
+- real Blockly workspace with snap-together custom Events, Database and Screen blocks;
+- Blockly JSON workspace state saved with the pupil project;
+- existing V1.4 programs migrate into Blockly stacks;
+- live Python-style / plain-English representation of the Blockly program;
+- new database **first record** and screen **set text** blocks;
+- pupil Publish creates a separate public snapshot in `publishedApps/{publicId}`;
+- 14-character unlisted public app IDs and share URLs;
+- QR code generated on the pupil Publish screen;
+- dedicated `published.html` runtime which does not expose the classroom builder;
+- Android PWA manifest generated per published app, using the pupil's app name/orientation/icon;
+- 192px and 512px install icons stored outside the pupil 20-image allowance;
+- service worker and Android install flow;
+- update an existing published app without changing its QR link;
+- unpublish to switch the public link off.
+
+See `UPDATE-V1.5.md` when upgrading an already connected V1.4 site.
+
+## New in V1.4
+
+- pupil projects start completely blank — no sample database, records, components or blocks;
+- step-by-step tutorial that checks work without doing it for the pupil;
+- pupils name their own app and database table;
+- teacher assignments always start blank;
+- teachers can choose Guided tutorial or Checklist only;
+- legacy built-in demo projects are ignored for new pupil work;
+- no Firestore/Storage rules change is required from V1.3.
+
+See `UPDATE-V1.4.md` when upgrading an already connected site.
 
 ## New in V1.3
 
@@ -72,7 +104,7 @@ imageBank/{imageId}
 
 ## Important V1.3 boundary
 
-The classroom/login/storage layer is now real when Firebase is enabled. The Android **Publish → QR code → installable per-pupil PWA** endpoint is still the next stage. The Publish screen already stores the app identity and icon needed for it.
+The classroom/login/storage layer is now real when Firebase is enabled. V1.5 implements the Android **Publish → QR code → installable per-pupil PWA** flow. Published apps are unlisted public snapshots rather than editable classroom projects.
 
 ## Run locally
 

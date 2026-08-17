@@ -142,5 +142,21 @@ service cloud.firestore {
         || ownsClass(resource.data.classId)
       );
     }
+
+    // Public snapshots created by pupils when they press Publish.
+    // The public can GET only a document whose published flag is true; listing is blocked.
+    match /publishedApps/{appId} {
+      allow get: if resource.data.published == true
+        || (signedIn() && resource.data.ownerUid == request.auth.uid);
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.published == true;
+      allow update: if signedIn()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.projectId == resource.data.projectId;
+      allow delete: if signedIn() && resource.data.ownerUid == request.auth.uid;
+    }
   }
 }

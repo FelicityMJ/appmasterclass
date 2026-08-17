@@ -37,10 +37,15 @@ service firebase.storage {
     }
 
     // Separate icon path, so app icons do not consume one of the pupil's 20 slots.
-    match /users/{uid}/appIcons/{projectId}/icon.webp {
-      allow read: if signedIn() && request.auth.uid == uid;
-      allow create, update: if signedIn() && request.auth.uid == uid && smallImage();
-      allow delete: if signedIn() && request.auth.uid == uid;
+    match /users/{uid}/appIcons/{projectId}/{fileName} {
+      // App icons are deliberately public so an installed PWA can fetch them without signing in.
+      allow read: if true;
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && fileName in ['icon.webp','icon-192.webp','icon-512.webp']
+        && smallImage();
+      allow delete: if signedIn() && request.auth.uid == uid
+        && fileName in ['icon.webp','icon-192.webp','icon-512.webp'];
     }
   }
 }

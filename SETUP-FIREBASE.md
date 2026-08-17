@@ -1,6 +1,6 @@
-# Connect DataApp Studio V1.3 to Firebase
+# Connect DataApp Studio V1.4 to Firebase
 
-This guide is written for the files in this ZIP.
+This guide is written for the files in this ZIP. V1.4 keeps the V1.3 Firebase schema and security rules; its main change is the blank-canvas pupil tutorial.
 
 ## What Firebase is doing
 
@@ -88,7 +88,7 @@ Replace the existing rules with the complete contents of this ZIP's:
 
 Then click **Publish**.
 
-Do not use older V1.1/V1.2 rules with this build; the V1.3 role/class/image model is different.
+Use the complete V1.5 rules supplied with this build. They include the V1.3 classroom model plus V1.5 public publishing permissions.
 
 ---
 
@@ -107,7 +107,7 @@ In Firebase Console:
 
 As of 2026, Cloud Storage for Firebase requires the Firebase project to be on the **Blaze pay-as-you-go plan**, although no-cost Cloud Storage usage can still be available within Google's free allowances. Set a budget alert before using it with real pupils.
 
-### Put in the V1.3 Storage rules
+### Put in the V1.5 Storage rules
 
 Open **Storage → Rules**.
 
@@ -358,3 +358,16 @@ Check that the code is exactly the current code displayed on the teacher class. 
 
 ### Image upload fails
 Check Storage is enabled, V1.3 Storage rules are published, and the signed-in user has the correct role. The browser attempts to compress images before upload; Storage still rejects files over 150 KB as a second guardrail.
+
+
+---
+
+## V1.5 — enable published Android apps
+
+V1.5 adds a `publishedApps` Firestore collection and 192/512 install-icon files. If you upgraded from V1.4, republish both rule files before testing Publish.
+
+A pupil's public app URL points to `published.html?id=RANDOM_ID`. The public Firestore rule permits **GET only** when that document's `published` flag is true and denies collection listing. The published document does not contain the pupil's email or display name.
+
+GitHub Pages must be served over HTTPS for Android PWA installation. Keep GitHub Pages **Enforce HTTPS** on.
+
+See `UPDATE-V1.5.md` for the exact file replacement and testing sequence.

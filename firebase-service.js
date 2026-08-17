@@ -225,7 +225,6 @@ export async function saveProjectToCloud(project, user, classId){
     ...project,
     projectId:project.id,
     ownerUid:user.uid,
-    ownerName:user.displayName||'',
     classId,
     updatedAt:s.dbSdk.serverTimestamp()
   }, {merge:true});
@@ -380,5 +379,65 @@ async function makeUniqueJoinCode(s){
 function makeJoinCode(){
   const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const nums=new Uint32Array(6); crypto.getRandomValues(nums);
+  return [...nums].map(n=>alphabet[n%alphabet.length]).join('');
+}
+
+export async function uploadPublishedIcons(user, projectId, icon192DataUrl, icon512DataUrl){
+  const s=await initFirebaseServices();
+  if(!s||!user) throw new Error('Sign in first.');
+  const safeProject=String(projectId||'project').replace(/[^a-zA-Z0-9_-]/g,'_');
+  const uploadOne=async(name,dataUrl)=>{
+    const blob=dataUrlToBlob(dataUrl);
+    const path=`users/${user.uid}/appIcons/${safeProject}/${name}.webp`;
+    const ref=s.storageSdk.ref(s.storage,path);
+    await s.storageSdk.uploadBytes(ref,blob,{contentType:'image/webp'});
+    return s.storageSdk.getDownloadURL(ref);
+  };
+  const [icon192,icon512]=await Promise.all([uploadOne('icon-192',icon192DataUrl),uploadOne('icon-512',icon512DataUrl)]);
+  return {icon192,icon512};
+}
+
+export async function publishProject(user, project, snapshot, icons){
+  const s=await initFirebaseServices();
+  if(!s||!user) throw new Error('Sign in first.');
+  if(!project?.id) throw new Error('This project does not have an ID yet.');
+  let publicId=project.publish?.publicId||'';
+  if(!publicId){
+    for(let i=0;i<8;i++){
+      const candidate=makePublicId();
+      const test=await s.dbSdk.getDoc(s.dbSdk.doc(s.db,'publishedApps',candidate));
+      if(!test.exists()){publicId=candidate;break;}
+    }
+  }
+  if(!publicId) throw new Error('Could not make a unique publishing link. Try again.');
+  const pub=project.publish||{};
+  const ref=s.dbSdk.doc(s.db,'publishedApps',publicId);
+  const data={
+    ownerUid:user.uid,
+    projectId:project.id,
+    appName:(pub.appName||project.name||'My App').slice(0,60),
+    theme:pub.theme||'#6256df',
+    orientation:pub.orientation||'any',
+    icon192:icons?.icon192||'',
+    icon512:icons?.icon512||'',
+    snapshot,
+    published:true,
+    updatedAt:s.dbSdk.serverTimestamp()
+  };
+  const existing=await s.dbSdk.getDoc(ref);
+  if(!existing.exists()) data.publishedAt=s.dbSdk.serverTimestamp();
+  await s.dbSdk.setDoc(ref,data,{merge:true});
+  return {publicId,...data};
+}
+
+export async function unpublishProject(user, publicId){
+  const s=await initFirebaseServices();
+  if(!s||!user||!publicId) throw new Error('Nothing is published yet.');
+  await s.dbSdk.updateDoc(s.dbSdk.doc(s.db,'publishedApps',publicId),{published:false,updatedAt:s.dbSdk.serverTimestamp()});
+}
+
+function makePublicId(){
+  const alphabet='abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const nums=new Uint32Array(14);crypto.getRandomValues(nums);
   return [...nums].map(n=>alphabet[n%alphabet.length]).join('');
 }

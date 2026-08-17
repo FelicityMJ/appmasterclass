@@ -7,8 +7,9 @@ import {
   listAssignments as cloudListAssignments, saveProjectToCloud,
   listMyProjects, listClassProjects, listPersonalImages,
   uploadPersonalImage, deletePersonalImage, listSharedImages,
-  uploadSharedImage, deleteSharedImage, uploadAppIcon
+  uploadSharedImage, deleteSharedImage, uploadPublishedIcons, publishProject, unpublishProject
 } from './firebase-service.js';
+import { initBlocklyEditor } from './blockly-integration.js';
 
 const $ = (sel, root=document) => root.querySelector(sel);
 const $$ = (sel, root=document) => [...root.querySelectorAll(sel)];
@@ -89,112 +90,40 @@ async function compressImage(file,targetBytes=PERSONAL_IMAGE_TARGET_BYTES,maxDim
 }
 function friendlyBytes(n){ return n<1024?`${n} B`:`${Math.max(1,Math.round(n/1024))} KB`; }
 
-const starterProject = {
-  id:'project-tourist',
-  name:'Scottish Places App',
-  publish:{appName:'Scottish Places',icon:'',theme:'#5b5ce2',orientation:'portrait'},
-  tableName:'Places',
-  fields:[
-    {id:'id',name:'ID',type:'number'},
-    {id:'place',name:'Place',type:'text'},
-    {id:'location',name:'Location',type:'text'},
-    {id:'description',name:'Description',type:'text'},
-    {id:'picture',name:'Picture',type:'image'}
-  ],
-  records:[
-    {id:1,place:'Edinburgh Castle',location:'Edinburgh',description:'A historic fortress above the city.',picture:imageSvg('🏰','Edinburgh Castle','#efe9ff')},
-    {id:2,place:'Loch Ness',location:'Highlands',description:'A famous Scottish loch with a legendary monster.',picture:imageSvg('🌊','Loch Ness','#e1f5ff')},
-    {id:3,place:'Falkirk Wheel',location:'Falkirk',description:'A rotating boat lift connecting two canals.',picture:imageSvg('⚙️','Falkirk Wheel','#e8fff3')}
-  ],
-  components:[
-    {id:'titleLabel',type:'label',name:'TitleLabel',x:22,y:55,w:275,h:50,text:'Scottish Places',fontSize:26,align:'center'},
-    {id:'placeImage',type:'image',name:'PlaceImage',x:25,y:125,w:270,h:185,src:imageSvg('🏰','Edinburgh Castle','#efe9ff')},
-    {id:'placeLabel',type:'label',name:'PlaceLabel',x:25,y:325,w:270,h:42,text:'Edinburgh Castle',fontSize:22,align:'center'},
-    {id:'descLabel',type:'label',name:'DescriptionLabel',x:30,y:375,w:260,h:72,text:'A historic fortress above the city.',fontSize:14,align:'center'},
-    {id:'nextButton',type:'button',name:'NextButton',x:170,y:500,w:120,h:46,text:'Next →'},
-    {id:'prevButton',type:'button',name:'PreviousButton',x:35,y:500,w:120,h:46,text:'← Previous'}
-  ],
-  program:[
-    {id:'b1',type:'event_open'},
-    {id:'b2',type:'set_field',target:'placeImage',field:'picture'},
-    {id:'b3',type:'set_field',target:'placeLabel',field:'place'},
-    {id:'b4',type:'set_field',target:'descLabel',field:'description'},
-    {id:'b5',type:'event_click',component:'nextButton'},
-    {id:'b6',type:'next_record'},
-    {id:'b7',type:'set_field',target:'placeImage',field:'picture'},
-    {id:'b8',type:'set_field',target:'placeLabel',field:'place'},
-    {id:'b9',type:'set_field',target:'descLabel',field:'description'},
-    {id:'b10',type:'event_click',component:'prevButton'},
-    {id:'b11',type:'prev_record'},
-    {id:'b12',type:'set_field',target:'placeImage',field:'picture'},
-    {id:'b13',type:'set_field',target:'placeLabel',field:'place'},
-    {id:'b14',type:'set_field',target:'descLabel',field:'description'}
-  ]
-};
-
 const projectTemplates = {
-  tourist: starterProject,
-  animals: {
-    ...clone(starterProject),
-    id:'project-animals',
-    name:'Animal Facts App',
-    tableName:'Animals',
-    fields:[
-      {id:'id',name:'ID',type:'number'},
-      {id:'animal',name:'Animal',type:'text'},
-      {id:'habitat',name:'Habitat',type:'text'},
-      {id:'diet',name:'Diet',type:'text'},
-      {id:'picture',name:'Picture',type:'image'}
-    ],
-    records:[
-      {id:1,animal:'Red panda',habitat:'Mountain forests',diet:'Bamboo and fruit',picture:imageSvg('🐼','Red panda','#fff0ea')},
-      {id:2,animal:'Dolphin',habitat:'Ocean',diet:'Fish and squid',picture:imageSvg('🐬','Dolphin','#e4f5ff')},
-      {id:3,animal:'Owl',habitat:'Woodlands',diet:'Small animals',picture:imageSvg('🦉','Owl','#fff7da')}
-    ],
-    components:[],
-    program:[]
-  },
-  music: {
-    ...clone(starterProject),
-    id:'project-music',
-    name:'Music Guide App',
-    tableName:'Songs',
-    fields:[
-      {id:'id',name:'ID',type:'number'},
-      {id:'song',name:'Song',type:'text'},
-      {id:'artist',name:'Artist',type:'text'},
-      {id:'genre',name:'Genre',type:'text'},
-      {id:'cover',name:'Cover',type:'image'}
-    ],
-    records:[
-      {id:1,song:'Midnight Drive',artist:'Nova',genre:'Pop',cover:imageSvg('🎵','Midnight Drive','#f0e9ff')},
-      {id:2,song:'Green Room',artist:'The Oaks',genre:'Indie',cover:imageSvg('🎸','Green Room','#eaf8ea')},
-      {id:3,song:'Skyline',artist:'Pulse',genre:'Electronic',cover:imageSvg('🎧','Skyline','#e6f1ff')}
-    ],
-    components:[],
-    program:[]
-  },
   blank: {
     id:'project-blank',
     name:'My New App',
     publish:{appName:'My New App',icon:'',theme:'#5b5ce2',orientation:'portrait'},
     tableName:'MyData',
-    fields:[
-      {id:'id',name:'ID',type:'number'},
-      {id:'name',name:'Name',type:'text'},
-      {id:'info',name:'Information',type:'text'}
-    ],
-    records:[
-      {id:1,name:'First item',info:'Add your information here.'}
-    ],
+    fields:[],
+    records:[],
     components:[],
-    program:[]
+    program:[],
+    tutorialEnabled:true,
+    blocklyState:null
   }
 };
 
+function freshBlankProject(name='My New App', assignmentId=''){
+  const project=clone(projectTemplates.blank);
+  project.id=`project-${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
+  project.name=name||'My New App';
+  project.publish.appName=project.name;
+  project.assignmentId=assignmentId||'';
+  project.tutorialEnabled=true;
+  return project;
+}
+function isEmptyProject(project){
+  return !project?.fields?.length && !project?.records?.length && !project?.components?.length && !project?.program?.length;
+}
+function isLegacyDemoProject(project){
+  const id=String(project?.projectId||project?.id||'');
+  return ['project-tourist','project-animals','project-music'].some(prefix=>id===prefix||id.startsWith(prefix+'-'));
+}
+
 const defaultAssignments = [
-  {id:'a-tourist',title:'Scottish Places App',template:'tourist',level:'Guided',requirements:{records:3,components:5,blocks:8}},
-  {id:'a-animals',title:'Animal Facts App',template:'animals',level:'Starter',requirements:{records:4,components:4,blocks:4}}
+  {id:'a-first',title:'My First Database App',template:'blank',level:'Guided',tutorialMode:'guided',requirements:{records:3,components:4,blocks:4}}
 ];
 
 function loadAssignments(){
@@ -235,8 +164,8 @@ const state = {
 };
 
 function loadProject(){
-  try { return JSON.parse(localStorage.getItem('dataapp_project')) || clone(starterProject); }
-  catch { return clone(starterProject); }
+  try { return JSON.parse(localStorage.getItem('dataapp_project')) || freshBlankProject(); }
+  catch { return freshBlankProject(); }
 }
 function saveProject(){
   localStorage.setItem('dataapp_project',JSON.stringify(state.project));
@@ -273,7 +202,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.3</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.5</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this account is not yet on the teacher allow-list.</p>
     <div class="notice"><b>Your Firebase UID</b><div class="uid-box">${escapeHtml(state.user.uid)}</div></div>
     <p class="muted">In Firestore create <b>teacherAllowlist → ${escapeHtml(state.user.uid)}</b> with the field <b>enabled = true</b>, then click Check again.</p>
@@ -283,7 +212,7 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.3 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.5 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -318,18 +247,19 @@ function pupilView(){
     <div class="card empty-class-card"><div class="big-emoji">🏫</div><h2>Enter the class code from your teacher</h2><p class="muted">You only need to join once. The class will appear here every time you sign in.</p><button class="btn primary" data-action="join-class">Join class</button></div>
   </main></div>`;
   const cls=state.currentClass;
+  const empty=isEmptyProject(state.project);
   return `<div class="shell">${topbar(CLOUD_MODE?'Pupil':'Pupil preview')}<main class="page">
-    <div class="welcome"><div><h1>Hi ${escapeHtml(name)} 👋</h1><p>${cls?`You are working in <b>${escapeHtml(cls.name||cls.className||'your class')}</b>.`:'Choose an assignment or continue your project.'}</p></div><div><button class="btn" data-action="join-class">+ Join another class</button> <button class="btn primary" data-action="open-builder">Open current project</button></div></div>
+    <div class="welcome"><div><h1>Hi ${escapeHtml(name)} 👋</h1><p>${cls?`You are working in <b>${escapeHtml(cls.name||cls.className||'your class')}</b>.`:'Choose an assignment or start your own app.'}</p></div><div><button class="btn" data-action="join-class">+ Join another class</button> <button class="btn primary" data-action="open-builder">${empty?'Start a blank app':'Open current project'}</button></div></div>
     ${classSwitcher()}
     <div class="cards" style="margin-bottom:16px">
-      <div class="card project-card"><div><div class="tag" style="display:inline-block;margin-bottom:8px">CURRENT PROJECT</div><h3>${escapeHtml(state.project.name)}</h3><p class="muted">${escapeHtml(state.project.tableName)} database · ${state.project.records.length} records · ${state.project.components.length} components</p></div><div class="progress"><span style="width:${projectProgress()}%"></span></div><div class="project-meta">${checklistBadges()}</div><button class="btn primary" data-action="open-builder">Continue building →</button></div>
-      <div class="card"><h3>Cloud classroom</h3><p class="muted">${CLOUD_MODE?'Your work saves to Firebase while you build. Your personal images follow your Google account between devices.':'Local preview mode.'}</p><div class="notice">🖼 <b>${personalImageCount()}/20</b> personal images used. Shared teacher images do not count.</div></div>
+      ${empty?`<div class="card project-card blank-project-card"><div><div class="tag" style="display:inline-block;margin-bottom:8px">BLANK CANVAS</div><h3>Build your own app from scratch</h3><p class="muted">There are no example records, screen components or blocks. The tutorial will guide you, but you create every part yourself.</p></div><button class="btn primary" data-action="open-builder">Start tutorial →</button></div>`:
+      `<div class="card project-card"><div><div class="tag" style="display:inline-block;margin-bottom:8px">CURRENT PROJECT</div><h3>${escapeHtml(state.project.name)}</h3><p class="muted">${escapeHtml(state.project.tableName)} database · ${state.project.records.length} records · ${state.project.components.length} components</p></div><div class="progress"><span style="width:${projectProgress()}%"></span></div><div class="project-meta">${checklistBadges()}</div><button class="btn primary" data-action="open-builder">Continue building →</button></div>`}
+      <div class="card"><h3>🧭 Built-in tutorial</h3><p class="muted">Follow one small step at a time. It explains database words, tells you what to click and ticks each stage when you have done it yourself.</p><div class="notice">🖼 <b>${personalImageCount()}/20</b> personal images used. Shared teacher images do not count.</div></div>
     </div>
-    <div class="section-head"><div><h2 style="font-size:20px">Assignments from your teacher</h2><p>${state.assignments.length?'Choose one to start a fresh project.':'Your teacher has not added an assignment to this class yet.'}</p></div></div>
+    <div class="section-head"><div><h2 style="font-size:20px">Assignments from your teacher</h2><p>${state.assignments.length?'Assignments also begin with a completely blank app.':'Your teacher has not added an assignment to this class yet.'}</p></div></div>
     <div class="cards">${state.assignments.length?state.assignments.map(a=>assignmentCard(a)).join(''):'<div class="card"><div class="empty-note">No assignments yet.</div></div>'}</div>
   </main></div>`;
 }
-
 function teacherView(){
   if(!state.classes.length) return `<div class="shell">${topbar(CLOUD_MODE?'Teacher':'Teacher preview')}<main class="page">
     <div class="welcome"><div><h1>Your classrooms</h1><p>Create your first class. A join code will be generated automatically.</p></div><div><button class="btn" data-action="manage-bank">🖼 Manage Image Bank</button> <button class="btn primary" data-action="create-class">+ Create class</button></div></div>
@@ -346,7 +276,7 @@ function teacherView(){
       <div class="card"><div class="muted">Shared Image Bank</div><h2 style="margin:5px 0">${state.media.shared.filter(x=>!x.locked).length}</h2><button class="btn small" data-action="manage-bank">Add images</button></div>
     </div>
     <div class="section-head"><div><h2 style="font-size:19px">Assignments</h2><p>These appear automatically on pupils' dashboards.</p></div></div>
-    <div class="cards" style="margin-bottom:16px">${state.assignments.length?state.assignments.map(a=>`<div class="card"><div class="tag">${escapeHtml(a.level||'Guided')}</div><h3>${escapeHtml(a.title)}</h3><p class="muted">${a.requirements?.records||1}+ records · ${a.requirements?.components||4}+ components · ${a.requirements?.blocks||4}+ blocks</p><button class="btn small" data-start-assignment="${escapeAttr(a.id)}">Preview starter</button></div>`).join(''):'<div class="card"><div class="empty-note">No assignments yet. Click + New assignment.</div></div>'}</div>
+    <div class="cards" style="margin-bottom:16px">${state.assignments.length?state.assignments.map(a=>`<div class="card"><div class="tag">${escapeHtml(a.level||'Guided')}</div><h3>${escapeHtml(a.title)}</h3><p class="muted">${a.requirements?.records||1}+ records · ${a.requirements?.components||4}+ components · ${a.requirements?.blocks||4}+ blocks</p><button class="btn small" data-start-assignment="${escapeAttr(a.id)}">Preview task</button></div>`).join(''):'<div class="card"><div class="empty-note">No assignments yet. Click + New assignment.</div></div>'}</div>
     <div class="card"><div class="section-head"><div><h2 style="font-size:19px">Pupils & projects</h2><p>Real members and saved projects from Firestore.</p></div></div>
       <table class="class-table"><thead><tr><th>Pupil</th><th>Email</th><th>Latest project</th><th>Data</th><th>Design</th><th>Blocks</th><th></th></tr></thead><tbody>
       ${state.members.length?state.members.map(m=>{const p=projectByUid.get(m.uid||m.id);return `<tr><td>${escapeHtml(m.displayName||'Pupil')}</td><td>${escapeHtml(m.email||'')}</td><td>${escapeHtml(p?.name||'Not started')}</td><td>${p?p.records?.length||0:'—'}</td><td>${p?p.components?.length||0:'—'}</td><td>${p?p.program?.length||0:'—'}</td><td><button class="btn small" data-remove-member="${escapeAttr(m.uid||m.id)}">Remove</button></td></tr>`}).join(''):'<tr><td colspan="7"><div class="empty-note">No pupils have joined yet. Give them class code <b>'+escapeHtml(cls?.joinCode||'')+'</b>.</div></td></tr>'}
@@ -356,13 +286,65 @@ function teacherView(){
 }
 
 function builderView(){return `<div class="builder">
-<div class="builder-head"><button class="btn small" data-action="back-pupil">← Dashboard</button><div class="project-title">${escapeHtml(state.project.name)}</div><span class="mini-progress">${projectProgress()}% ready</span><span class="save-state">Saved locally</span><button class="btn small" data-action="reset">Reset project</button></div>
+<div class="builder-head"><button class="btn small" data-action="back-pupil">← Dashboard</button><div class="project-title">${escapeHtml(state.project.name)}</div><span class="mini-progress">${projectProgress()}% ready</span><span class="save-state">${CLOUD_MODE?'Cloud project':'Saved locally'}</span><button class="btn small tutorial-toggle" data-action="toggle-tutorial">${state.project.tutorialEnabled===false?'Show tutorial':'Hide tutorial'}</button><button class="btn small" data-action="reset">Clear project</button></div>
 <div class="step-tabs">${['data','design','blocks','test','publish'].map((t,i)=>`<button class="step-tab ${state.tab===t?'active':''}" data-tab="${t}">${['1. 🗃 DATA','2. 🎨 DESIGN','3. 🧩 BLOCKS','4. ▶ TEST','5. 🚀 PUBLISH'][i]}</button>`).join('')}</div>
+${state.project.tutorialEnabled===false?'':tutorialPanel()}
 <div class="builder-body">${state.tab==='data'?dataView():state.tab==='design'?designView():state.tab==='blocks'?blocksView():state.tab==='test'?testView():publishView()}</div>
 </div>`}
-function dataView(){return `<div class="section-head"><div><h2>Build your database</h2><p>Each row is a <b>record</b>. Each column is a <b>field</b>.</p></div><div><button class="btn" data-action="manage-images">🖼 My Images ${personalImageCount()}/${PERSONAL_IMAGE_LIMIT}</button> <button class="btn" data-action="add-field">+ Add field</button> <button class="btn primary" data-action="add-record">+ Add record</button></div></div>
-<div class="notice">Personal uploads are automatically resized and compressed. You can upload up to <b>${PERSONAL_IMAGE_LIMIT}</b>; shared Image Bank pictures do not use your allowance.</div><div class="notice">Your table is called <b>${escapeHtml(state.project.tableName)}</b>. The first field acts as the unique ID for each record.</div>
-<div class="data-wrap"><table class="data-table"><thead><tr><th class="row-num">#</th>${state.project.fields.map(f=>`<th>${escapeHtml(f.name)}<span class="data-type">${typeIcon(f.type)} ${f.type}</span></th>`).join('')}<th></th></tr></thead><tbody>${state.project.records.map((r,ri)=>`<tr><td class="row-num">${ri+1}</td>${state.project.fields.map(f=>`<td>${dataCell(f,r,ri)}</td>`).join('')}<td><button class="icon-btn" data-delete-record="${ri}" title="Delete record">✕</button></td></tr>`).join('')}</tbody></table></div>`}
+
+function tutorialSteps(){
+  const fields=state.project.fields||[], records=state.project.records||[], comps=state.project.components||[], program=state.project.program||[];
+  const hasId=fields.some((f,i)=>i===0&&f.type==='number');
+  const hasDisplay=comps.some(c=>['label','image','list'].includes(c.type));
+  const hasButton=comps.some(c=>c.type==='button');
+  const connected=program.some(b=>b.type==='set_field');
+  const clickEvent=program.some(b=>b.type==='event_click');
+  const moves=program.some(b=>['next_record','prev_record'].includes(b.type));
+  return [
+    {tab:'data',title:'Name your app and database',done:state.project.name!=='My New App'&&state.project.tableName!=='MyData',
+      text:'Choose your own idea. Give the app a name, then name the database table that will hold its information.',
+      tip:'Examples of table names: Animals, Films, Players, Recipes or Places.'},
+    {tab:'data',title:'Create your fields',done:fields.length>=3,
+      text:'Click + Add field and create at least three columns. A field is one type of information you want to store.',
+      tip:`Good start: ID as Number, then your own Text fields${hasId?' — your first numeric ID field is ready.':'. Make the first field an ID number if you can.'}`},
+    {tab:'data',title:'Add your records',done:records.length>=3,
+      text:'Click + Add record at least three times and type different information into each row. Each row is one record.',
+      tip:'Do not copy the same information three times — make each record genuinely different.'},
+    {tab:'design',title:'Design the phone screen',done:comps.length>=3&&hasDisplay&&hasButton,
+      text:'Go to Design and add the components your app needs. Drag them into position and change their text and size.',
+      tip:'Try a label, an image if you have an image field, and a Next button.'},
+    {tab:'design',title:'Connect screen to data',done:connected,
+      text:'Click a label or image on the phone, then click Connect Data. Choose which database field it should display.',
+      tip:'This creates real blocks for you to inspect — it does not fill the app with example data.'},
+    {tab:'blocks',title:'Make a button change record',done:clickEvent&&moves,
+      text:'In Blocks add “when button clicked”, then “next record” (or previous record). Add display blocks so the screen updates after the move.',
+      tip:'Programming is an event followed by actions: WHEN something happens → DO these instructions.'},
+    {tab:'test',title:'Test your app',done:state.tutorialTested===true,
+      text:'Run the app. Click your button and check that it moves through the records and displays the right information.',
+      tip:'If it does not work, use the What’s happening log rather than guessing.'}
+  ];
+}
+function tutorialPanel(){
+  const steps=tutorialSteps(), completed=steps.filter(x=>x.done).length;
+  const current=steps.find(x=>!x.done)||steps[steps.length-1];
+  const pct=Math.round(completed/steps.length*100);
+  return `<section class="tutorial-panel">
+    <div class="tutorial-top"><div><span class="tutorial-kicker">🧭 GUIDED TUTORIAL</span><h3>${completed===steps.length?'You built it yourself 🎉':`Step ${Math.min(completed+1,steps.length)} of ${steps.length}: ${escapeHtml(current.title)}`}</h3></div><strong>${completed}/${steps.length}</strong></div>
+    <div class="tutorial-progress"><span style="width:${pct}%"></span></div>
+    ${completed===steps.length?`<p>You now have a database, interface and program that you created from a blank canvas. You can keep improving it or move to Publish.</p>`:
+    `<p>${escapeHtml(current.text)}</p><div class="tutorial-tip">💡 ${escapeHtml(current.tip)}</div><button class="btn primary small" data-tutorial-tab="${current.tab}">Go to ${cap(current.tab)} →</button>`}
+    <details class="tutorial-all"><summary>See all tutorial steps</summary><ol>${steps.map(x=>`<li class="${x.done?'done':''}">${x.done?'✓':'○'} ${escapeHtml(x.title)}</li>`).join('')}</ol></details>
+  </section>`;
+}
+
+function dataView(){return `<div class="section-head"><div><h2>Build your database</h2><p>Start from nothing: you choose the table, fields and records.</p></div><div><button class="btn" data-action="manage-images">🖼 My Images ${personalImageCount()}/${PERSONAL_IMAGE_LIMIT}</button> <button class="btn" data-action="add-field">+ Add field</button> <button class="btn primary" data-action="add-record" ${state.project.fields.length?'':'disabled title="Add a field first"'}>+ Add record</button></div></div>
+<div class="project-setup-grid">
+  <div class="field"><label>My app is called</label><input id="projectNameInput" value="${escapeAttr(state.project.name)}" placeholder="e.g. My Animal Guide" maxlength="50"></div>
+  <div class="field"><label>My database table is called</label><input id="tableNameInput" value="${escapeAttr(state.project.tableName)}" placeholder="e.g. Animals" maxlength="40"></div>
+</div>
+<div class="notice"><b>Database words:</b> a <b>field</b> is a column/type of information; a <b>record</b> is one complete row/item. Your first field should normally be a unique ID.</div>
+${!state.project.fields.length?`<div class="blank-builder-state"><div class="big-emoji">🗃️</div><h3>Your database is completely empty</h3><p>Good — you are building it yourself. Start by clicking <b>+ Add field</b>. The tutorial above will guide you.</p></div>`:
+`<div class="data-wrap"><table class="data-table"><thead><tr><th class="row-num">#</th>${state.project.fields.map(f=>`<th>${escapeHtml(f.name)}<span class="data-type">${typeIcon(f.type)} ${f.type}</span></th>`).join('')}<th></th></tr></thead><tbody>${state.project.records.map((r,ri)=>`<tr><td class="row-num">${ri+1}</td>${state.project.fields.map(f=>`<td>${dataCell(f,r,ri)}</td>`).join('')}<td><button class="icon-btn" data-delete-record="${ri}" title="Delete record">✕</button></td></tr>`).join('')}</tbody></table>${!state.project.records.length?'<div class="empty-note" style="margin-top:12px">Fields created. Now click <b>+ Add record</b> and enter your own data.</div>':''}</div>`}` }
 function dataCell(f,r,ri){
   const value=r[f.id]??'';
   if(f.type==='image') return `<div class="image-cell"><img src="${escapeAttr(resolveImage(value))}" alt=""><button class="btn small" data-image-record="${ri}" data-image-field="${f.id}">Change</button></div>`;
@@ -406,14 +388,9 @@ function componentMarkup(c,mode){
   return `<div class="screen-component ${sel}" ${attrs} style="${style}">${inner}</div>`;
 }
 
-function blocksView(){return `<div class="section-head"><div><h2>Make it work with blocks</h2><p>Events start a stack. Action blocks underneath run in order.</p></div><button class="btn good" data-tab="test">▶ Run app</button></div>
-<div class="blocks-grid"><aside class="block-palette"><h3>Block toolbox</h3>
-<div class="palette-group"><strong>Events</strong><button class="palette-block event" data-add-block="event_open">when Screen opens</button><button class="palette-block event" data-add-block="event_click">when button clicked</button></div>
-<div class="palette-group"><strong>Database</strong><button class="palette-block data" data-add-block="next_record">next record</button><button class="palette-block data" data-add-block="prev_record">previous record</button></div>
-<div class="palette-group"><strong>Screen</strong><button class="palette-block screenb" data-add-block="set_field">set component from field</button></div>
-<div class="empty-note">V1 keeps the toolbox deliberately small. Search, filters, if/else and variables come next.</div><div class="mini-checks">${checklistBadges()}</div></aside>
-<section class="block-canvas"><div style="font-size:12px;color:#8b93a2;margin-bottom:8px">PROGRAM</div>${programMarkup()}</section>
-<aside class="code-panel"><div style="display:flex;justify-content:space-between;align-items:center"><h3>Show code</h3><span class="tag">Read-only</span></div><div class="code-toggle"><button data-code-mode="python" class="${state.codeMode==='python'?'active':''}">Python idea</button><button data-code-mode="plain" class="${state.codeMode==='plain'?'active':''}">Plain English</button></div><div class="codebox">${escapeHtml(generateCode())}</div></aside></div>`}
+function blocksView(){return `<div class="section-head"><div><h2>Make it work with real Blockly</h2><p>Drag snap-together blocks from the toolbox. Put action blocks inside an event block.</p></div><button class="btn good" data-tab="test">▶ Run app</button></div>
+<div class="blockly-layout"><section class="blockly-card"><div class="blockly-help"><b>How it connects:</b> <span>Events decide <i>when</i>. Database blocks choose a record. Screen blocks put a database field into a component.</span></div><div id="blocklyDiv" class="blockly-workspace"></div></section>
+<aside class="code-panel blockly-code"><div style="display:flex;justify-content:space-between;align-items:center"><h3>Show code</h3><span class="tag">Live</span></div><div class="code-toggle"><button data-code-mode="python" class="${state.codeMode==='python'?'active':''}">Python idea</button><button data-code-mode="plain" class="${state.codeMode==='plain'?'active':''}">Plain English</button></div><div class="codebox" id="generatedCode">${escapeHtml(generateCode())}</div><div class="mini-checks">${checklistBadges()}</div><div class="notice" style="margin-top:12px">Tip: the <b>Connect Data</b> button can create the first connection for you, then you can inspect the Blockly stack and build the next one yourself.</div></aside></div>`}
 
 function programMarkup(){
   if(!state.project.program.length) return `<div class="hint">Click a block in the toolbox to start.</div>`;
@@ -438,19 +415,68 @@ function recordInspector(){const r=state.project.records[state.currentRecord]||{
 function publishView(){
   const pub=state.project.publish||(state.project.publish={appName:state.project.name,icon:'',theme:'#5b5ce2',orientation:'portrait'});
   const iconSrc=pub.iconData||resolveImage(pub.icon)||imageSvg('📱','App icon',pub.theme);
-  return `<div class="section-head"><div><h2>Publish your app</h2><p>Choose how your finished app will look when it is installed.</p></div></div>
+  const live=!!(pub.publicId&&pub.isPublished);
+  const shareUrl=live?publishedUrl(pub.publicId):'';
+  return `<div class="section-head"><div><h2>Publish your app</h2><p>Create a public, installable snapshot of the app you built.</p></div></div>
   <div class="publish-grid"><section class="card"><div class="publish-icon"><img src="${escapeAttr(iconSrc)}" alt="App icon"></div><div class="prop-group"><label>App name</label><input id="publishName" value="${escapeAttr(pub.appName||state.project.name)}" maxlength="30"></div>
   <div class="prop-group"><label>Orientation</label><select id="publishOrientation"><option value="portrait" ${pub.orientation==='portrait'?'selected':''}>Portrait</option><option value="landscape" ${pub.orientation==='landscape'?'selected':''}>Landscape</option><option value="any" ${pub.orientation==='any'?'selected':''}>Allow both</option></select></div>
   <button class="btn" data-action="choose-app-icon">🎨 Choose app icon</button> <button class="btn" data-action="upload-app-icon">⬆ Upload separate icon</button><input id="appIconFile" type="file" accept="image/*" hidden>
-  <div class="notice" style="margin-top:14px">Your app icon is <b>separate</b> and does not use one of your 20 personal image slots.</div></section>
-  <section class="card"><h3>Android publishing</h3><p class="muted">The project now stores the app name, icon and orientation needed for a project-specific installable web app.</p><div class="publish-phone"><div class="home-icon"><img src="${escapeAttr(iconSrc)}"><span>${escapeHtml(pub.appName||state.project.name)}</span></div></div>
-  <div class="notice warning">In this local prototype, Publish prepares the app identity and preview. The final hosted version will generate the project-specific manifest/share URL and QR code so Android can install it directly.</div></section></div>`;
+  <div class="notice" style="margin-top:14px">Your app icon is stored separately and <b>does not use one of your 20 personal image slots</b>.</div>
+  <button class="btn primary publish-main-btn" data-action="publish-project">${live?'Update published app':'🚀 Publish app'}</button>
+  ${live?`<button class="btn small" data-action="unpublish-project" style="margin-top:8px">Unpublish</button>`:''}</section>
+  <section class="card"><h3>${live?'Your Android app is ready':'Android publishing'}</h3><p class="muted">${live?'Scan the QR code on an Android phone, open the app in Chrome, then tap Install app.':'Choose an icon and press Publish. DataApp Studio will create an unlisted public snapshot, unique link and QR code.'}</p><div class="publish-phone"><div class="home-icon"><img src="${escapeAttr(pub.icon512||iconSrc)}"><span>${escapeHtml(pub.appName||state.project.name)}</span></div></div>
+  ${live?`<div class="publish-result"><div id="publishQr" class="qr-box" aria-label="QR code"></div><div class="share-url">${escapeHtml(shareUrl)}</div><div class="publish-actions"><button class="btn primary" data-action="open-published">Open app</button><button class="btn" data-action="copy-published">Copy link</button></div><div class="notice goodish">The link is a <b>published snapshot</b>. People opening it do not get access to the pupil's editable project or Google account.</div></div>`:
+  `<div class="notice warning">Publishing requires Firebase and a signed-in pupil account. Anyone with the QR code or link can open the published app, but they cannot access the pupil's classroom account or editable project.</div>`}</section></div>`;
 }
 function bindPublish(){
   const pub=state.project.publish||(state.project.publish={appName:state.project.name,icon:'',theme:'#5b5ce2',orientation:'portrait'});
   $('#publishName').oninput=e=>{pub.appName=e.target.value;saveProject()}; $('#publishOrientation').onchange=e=>{pub.orientation=e.target.value;saveProject();render()};
   $('[data-action="choose-app-icon"]').onclick=()=>showMediaPicker({title:'Choose an app icon',selected:pub.icon,iconMode:true,onSelect:choice=>{pub.icon=choice.ref;pub.iconData=choice.dataUrl;saveProject();render()}});
-  $('[data-action="upload-app-icon"]').onclick=()=>$('#appIconFile').click(); $('#appIconFile').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;try{const c=await compressImage(f,90*1024,512);pub.icon='';pub.iconData=(CLOUD_MODE&&state.user&&state.role==='pupil')?await uploadAppIcon(state.user,state.project.id,c):c.dataUrl;saveProject();render()}catch(err){alert(err.message)}};
+  $('[data-action="upload-app-icon"]').onclick=()=>$('#appIconFile').click(); $('#appIconFile').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;try{const c=await compressImage(f,90*1024,512);pub.icon='';pub.iconData=c.dataUrl;saveProject();render()}catch(err){alert(err.message)}};
+  const publish=$('[data-action="publish-project"]');if(publish)publish.onclick=()=>publishCurrentProject(publish);
+  const unpublish=$('[data-action="unpublish-project"]');if(unpublish)unpublish.onclick=async()=>{if(!confirm('Unpublish this app? Its QR link will stop opening until you publish it again.'))return;try{await unpublishProject(state.user,pub.publicId);pub.isPublished=false;saveProject();render()}catch(err){alert(friendlyFirebaseError(err))}};
+  const open=$('[data-action="open-published"]');if(open)open.onclick=()=>window.open(publishedUrl(pub.publicId),'_blank','noopener');
+  const copy=$('[data-action="copy-published"]');if(copy)copy.onclick=async()=>{const url=publishedUrl(pub.publicId);try{await navigator.clipboard.writeText(url);copy.textContent='✓ Copied'}catch{prompt('Copy this link:',url)}};
+  if(pub.publicId&&pub.isPublished)requestAnimationFrame(()=>renderPublishQr(publishedUrl(pub.publicId)));
+}
+function publishedUrl(publicId){const u=new URL('./published.html',location.href);u.search='';u.hash='';u.searchParams.set('id',publicId);return u.href}
+async function renderPublishQr(url){
+  const el=$('#publishQr');if(!el)return;el.innerHTML='<div class="muted">Making QR code…</div>';
+  try{
+    if(!window.QRCode)await loadExternalScript('https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js');
+    if(!document.body.contains(el))return;el.innerHTML='';new window.QRCode(el,{text:url,width:190,height:190,correctLevel:window.QRCode.CorrectLevel?.M});
+  }catch(err){if(document.body.contains(el))el.innerHTML=`<div class="empty-note">QR code could not load.<br><a href="${escapeAttr(url)}" target="_blank">Open app link</a></div>`;}
+}
+function loadExternalScript(src){return new Promise((resolve,reject)=>{const old=[...document.scripts].find(s=>s.src===src);if(old){old.addEventListener('load',resolve,{once:true});old.addEventListener('error',reject,{once:true});if(window.QRCode)return resolve();return}const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=reject;document.head.appendChild(script)})}
+async function loadImageSource(src){return new Promise((resolve,reject)=>{const img=new Image();if(/^https?:/i.test(src))img.crossOrigin='anonymous';img.onload=()=>resolve(img);img.onerror=()=>reject(new Error('Could not prepare the selected app icon. Try uploading a different icon.'));img.src=src})}
+async function makeSquareIconDataUrl(src,size,targetBytes){
+  const img=await loadImageSource(src);let quality=.8,blob=null;
+  for(let attempt=0;attempt<10;attempt++){
+    const canvas=document.createElement('canvas');canvas.width=size;canvas.height=size;const ctx=canvas.getContext('2d');ctx.fillStyle='#ffffff';ctx.fillRect(0,0,size,size);
+    const scale=Math.max(size/img.naturalWidth,size/img.naturalHeight),w=img.naturalWidth*scale,h=img.naturalHeight*scale;ctx.drawImage(img,(size-w)/2,(size-h)/2,w,h);
+    blob=await new Promise(res=>canvas.toBlob(res,'image/webp',quality));if(blob&&blob.size<=targetBytes)break;quality-=.08;
+  }
+  if(!blob||blob.size>targetBytes)throw new Error('The app icon could not be compressed enough. Try a simpler image.');
+  return blobToDataUrl(blob);
+}
+function makePublishSnapshot(){
+  const snap=clone(state.project);snap.blocklyState=null;delete snap.assignmentId;delete snap.tutorialEnabled;snap.publish={appName:state.project.publish?.appName||state.project.name,theme:state.project.publish?.theme||'#6256df',orientation:state.project.publish?.orientation||'any'};
+  const imageFields=new Set((snap.fields||[]).filter(f=>f.type==='image').map(f=>f.id));
+  for(const r of snap.records||[])for(const fid of imageFields)if(r[fid])r[fid]=resolveImage(r[fid]);
+  for(const c of snap.components||[])if(c.type==='image'&&c.src)c.src=resolveImage(c.src);
+  return snap;
+}
+async function publishCurrentProject(button){
+  if(!CLOUD_MODE||!state.user||state.role!=='pupil'){alert('Sign in as a pupil with Firebase before publishing.');return}
+  if(!state.project.fields.length||!state.project.components.length){alert('Build your database and app screen before publishing.');return}
+  const pub=state.project.publish||(state.project.publish={});
+  if(!pub.icon&&!pub.iconData){alert('Choose an app icon first.');return}
+  button.disabled=true;const original=button.textContent;button.textContent='Publishing…';
+  try{
+    const source=pub.iconData||resolveImage(pub.icon);const [i192,i512]=await Promise.all([makeSquareIconDataUrl(source,192,70*1024),makeSquareIconDataUrl(source,512,120*1024)]);
+    const icons=await uploadPublishedIcons(state.user,state.project.id,i192,i512);pub.icon192=icons.icon192;pub.icon512=icons.icon512;
+    const result=await publishProject(state.user,state.project,makePublishSnapshot(),icons);pub.publicId=result.publicId;pub.isPublished=true;saveProject();render();
+  }catch(err){console.error(err);alert(friendlyFirebaseError(err));button.disabled=false;button.textContent=original;}
 }
 
 function bindCommon(){
@@ -474,7 +500,7 @@ function bindCommon(){
     state.view='landing';state.role=null;state.user=null;state.classes=[];state.currentClass=null;render();
   });
   $$('[data-action="check-teacher"]').forEach(b=>b.onclick=async()=>{await finishSignedInUser(state.user,'teacher')});
-  $$('[data-action="open-builder"]').forEach(b=>b.onclick=()=>{state.view='builder';state.tab='data';render()});
+  $$('[data-action="open-builder"]').forEach(b=>b.onclick=()=>{state.view='builder';state.tab='data';if(state.project.tutorialEnabled===undefined)state.project.tutorialEnabled=true;render()});
   $$('[data-action="back-pupil"]').forEach(b=>b.onclick=()=>{state.view=state.role==='teacher'?'teacher':'pupil';render()});
   $$('[data-start-assignment]').forEach(b=>b.onclick=()=>startAssignment(b.dataset.startAssignment));
   $$('[data-select-class]').forEach(b=>b.onclick=()=>selectClass(b.dataset.selectClass));
@@ -493,15 +519,19 @@ function bindBuilder(){
   if(state.tab==='test') bindTest();
   if(state.tab==='publish') bindPublish();
   const manageImages=$('[data-action="manage-images"]'); if(manageImages)manageImages.onclick=showPersonalManager;
-  const reset=$('[data-action="reset"]'); if(reset) reset.onclick=()=>{if(confirm('Reset the demo project to its original state?')){state.project=clone(starterProject);state.currentRecord=0;saveProject();render()}};
+  const tutorialToggle=$('[data-action="toggle-tutorial"]'); if(tutorialToggle)tutorialToggle.onclick=()=>{state.project.tutorialEnabled=state.project.tutorialEnabled===false;saveProject();render()};
+  $$('[data-tutorial-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tutorialTab;if(state.tab==='test')startTest(false);render()});
+  const reset=$('[data-action="reset"]'); if(reset) reset.onclick=()=>{if(confirm('Clear this project and start again from a blank canvas? This removes its fields, records, screen components and blocks.')){const name=state.project.name,assignmentId=state.project.assignmentId||'',tutorialEnabled=state.project.tutorialEnabled!==false;state.project=freshBlankProject(name,assignmentId);state.project.tutorialEnabled=tutorialEnabled;state.currentRecord=0;state.selectedComponent=null;saveProject();render()}};
 }
 
 function bindData(){
   $$('.data-table [data-record][data-field]').forEach(inp=>{const update=()=>{const r=state.project.records[+inp.dataset.record];const f=state.project.fields.find(x=>x.id===inp.dataset.field);let v=inp.value;if(f.type==='number')v=Number(v);if(f.type==='boolean'&&v!=='')v=v==='true';r[f.id]=v;saveProject()};inp.oninput=update;inp.onchange=update});
   $$('[data-image-record]').forEach(b=>b.onclick=()=>showImageModal(+b.dataset.imageRecord,b.dataset.imageField));
   $$('[data-delete-record]').forEach(b=>b.onclick=()=>{state.project.records.splice(+b.dataset.deleteRecord,1);saveProject();render()});
-  $('[data-action="add-record"]').onclick=()=>{const row={};state.project.fields.forEach(f=>row[f.id]=f.type==='number'?0:f.type==='boolean'?false:'');if(state.project.fields[0]) row[state.project.fields[0].id]=nextId();state.project.records.push(row);saveProject();render()};
+  const addRecord=$('[data-action="add-record"]'); if(addRecord)addRecord.onclick=()=>{if(!state.project.fields.length){alert('Add at least one field before adding a record.');return}const row={};state.project.fields.forEach(f=>row[f.id]=f.type==='number'?0:f.type==='boolean'?false:'');if(state.project.fields[0]) row[state.project.fields[0].id]=nextId();state.project.records.push(row);saveProject();render()};
   $('[data-action="add-field"]').onclick=()=>showFieldModal();
+  const projectName=$('#projectNameInput'); if(projectName)projectName.oninput=()=>{state.project.name=projectName.value;if(!state.project.publish)state.project.publish={};state.project.publish.appName=projectName.value;saveProject()};
+  const tableName=$('#tableNameInput'); if(tableName)tableName.oninput=()=>{state.project.tableName=tableName.value;saveProject()};
 }
 function showImageModal(recordIndex,fieldId){
   showMediaPicker({
@@ -602,28 +632,36 @@ function bindDesign(){
   $$('[data-device]').forEach(btn=>btn.onclick=()=>{state.device=btn.dataset.device;render()});
   const chooseImage=$('[data-action="choose-component-image"]');if(chooseImage)chooseImage.onclick=()=>{const c=state.project.components.find(x=>x.id===state.selectedComponent);showMediaPicker({title:`Choose image for ${c.name}`,selected:c.src,onSelect:ref=>{c.src=ref;saveProject();render()}})};
   const connect=$('[data-action="connect-data"]');if(connect)connect.onclick=showConnectModal;
-  const del=$('[data-action="delete-component"]');if(del)del.onclick=()=>{const id=state.selectedComponent;state.project.components=state.project.components.filter(c=>c.id!==id);state.project.program=state.project.program.filter(b=>b.target!==id&&b.component!==id);state.selectedComponent=null;saveProject();render()};
+  const del=$('[data-action="delete-component"]');if(del)del.onclick=()=>{const id=state.selectedComponent;state.project.components=state.project.components.filter(c=>c.id!==id);state.project.program=state.project.program.filter(b=>b.target!==id&&b.component!==id);state.project.blocklyState=null;state.selectedComponent=null;saveProject();render()};
 }
 
 function bindBlocks(){
-  $$('[data-add-block]').forEach(b=>b.onclick=()=>{const type=b.dataset.addBlock;const block={id:`b_${Date.now()}_${Math.random().toString(36).slice(2,5)}`,type};if(type==='event_click')block.component=state.project.components.find(c=>c.type==='button')?.id||'';if(type==='set_field'){block.target=state.project.components[0]?.id||'';block.field=state.project.fields[1]?.id||state.project.fields[0]?.id||''}state.project.program.push(block);saveProject();render()});
-  $$('.program-block select').forEach(sel=>sel.onchange=()=>{const block=state.project.program.find(b=>b.id===sel.closest('.program-block').dataset.blockId);block[sel.dataset.blockProp]=sel.value;saveProject();render()});
-  $$('.remove-block').forEach(btn=>btn.onclick=()=>{const id=btn.closest('.program-block').dataset.blockId;state.project.program=state.project.program.filter(b=>b.id!==id);saveProject();render()});
-  $$('.move-block').forEach(btn=>btn.onclick=(e)=>{e.stopPropagation();const id=btn.closest('.program-block').dataset.blockId;moveBlock(id,Number(btn.dataset.dir))});
-  $$('[data-code-mode]').forEach(b=>b.onclick=()=>{state.codeMode=b.dataset.codeMode;render()});
+  const host=$('#blocklyDiv');
+  if(host){
+    requestAnimationFrame(async()=>{
+      try{
+        state.blocklyWorkspace=await initBlocklyEditor({
+          element:host,project:state.project,components:state.project.components,fields:state.project.fields,
+          onChange:({blocklyState,program})=>{
+            state.project.blocklyState=blocklyState; state.project.program=program; saveProject();
+            const code=$('#generatedCode'); if(code)code.textContent=generateCode();
+          }
+        });
+      }catch(err){host.innerHTML=`<div class="notice warning"><b>Blockly could not start.</b><br>${escapeHtml(err.message)}</div>`;}
+    });
+  }
+  $$('[data-code-mode]').forEach(b=>b.onclick=()=>{state.codeMode=b.dataset.codeMode;$$('[data-code-mode]').forEach(x=>x.classList.toggle('active',x.dataset.codeMode===state.codeMode));const code=$('#generatedCode');if(code)code.textContent=generateCode();});
 }
 
 
 function assignmentCard(a){
-  return `<div class="card assignment-card"><div class="project-meta"><span class="tag">${escapeHtml(a.level)}</span><span class="tag">${a.requirements.records}+ records</span></div><h3>${escapeHtml(a.title)}</h3><p class="muted">A ready-made database structure to help you start quickly.</p><button class="btn" data-start-assignment="${a.id}">Start fresh →</button></div>`;
+  const guided=(a.tutorialMode||'guided')!=='checklist';
+  return `<div class="card assignment-card"><div class="project-meta"><span class="tag">${escapeHtml(a.level||'Guided')}</span><span class="tag">Blank canvas</span><span class="tag">${guided?'🧭 Tutorial':'✓ Checklist'}</span></div><h3>${escapeHtml(a.title)}</h3><p class="muted">You create the database, screen and blocks yourself. No example app is copied in.</p><button class="btn" data-start-assignment="${a.id}">Start from blank →</button></div>`;
 }
 function startAssignment(id){
   const a=state.assignments.find(x=>x.id===id); if(!a)return;
-  const template=projectTemplates[a.template]||projectTemplates.blank;
-  state.project=clone(template);
-  state.project.id=`${template.id}-${Date.now()}`;
-  state.project.name=a.title;
-  state.project.assignmentId=a.id;
+  state.project=freshBlankProject(a.title,a.id);
+  state.project.tutorialEnabled=(a.tutorialMode||'guided')!=='checklist';
   state.selectedComponent=null; state.currentRecord=0; state.role=state.role||'pupil';
   saveProject(); state.view='builder'; state.tab='data'; render();
 }
@@ -631,15 +669,16 @@ function showAssignmentModal(){
   const wrap=document.createElement('div');wrap.className='modal-backdrop';
   wrap.innerHTML=`<div class="modal"><h3>Create an assignment</h3>
   <div class="field"><label>Assignment title</label><input id="assignmentTitle" value="My Database App"></div>
-  <div class="field"><label>Starter</label><select id="assignmentTemplate"><option value="blank">Blank app</option><option value="animals">Animal facts</option><option value="music">Music guide</option><option value="tourist">Scottish places</option></select></div>
-  <div class="field"><label>Support level</label><select id="assignmentLevel"><option>Starter</option><option selected>Guided</option><option>Independent</option></select></div>
-  <div class="field"><label>Minimum records</label><input id="assignmentRecords" type="number" value="4" min="1" max="30"></div>
+  <div class="notice">Pupils always begin this assignment with a completely blank database, screen and block canvas.</div>
+  <div class="field"><label>Pupil support</label><select id="assignmentTutorial"><option value="guided" selected>Guided tutorial — step by step</option><option value="checklist">Checklist only — more independent</option></select></div>
+  <div class="field"><label>Support level label</label><select id="assignmentLevel"><option>Starter</option><option selected>Guided</option><option>Independent</option></select></div>
+  <div class="field"><label>Minimum records</label><input id="assignmentRecords" type="number" value="3" min="1" max="30"></div>
   <div class="modal-actions"><button class="btn" id="cancelAssignment">Cancel</button><button class="btn primary" id="createAssignment">Create</button></div></div>`;
   document.body.appendChild(wrap);
   $('#cancelAssignment').onclick=()=>wrap.remove();
   $('#createAssignment').onclick=async()=>{
     const title=$('#assignmentTitle').value.trim()||'New assignment';
-    const assignment={id:CLOUD_MODE?'':`a-${Date.now()}`,title,template:$('#assignmentTemplate').value,level:$('#assignmentLevel').value,requirements:{records:Number($('#assignmentRecords').value)||1,components:4,blocks:4}};
+    const assignment={id:CLOUD_MODE?'':`a-${Date.now()}`,title,template:'blank',tutorialMode:$('#assignmentTutorial').value,level:$('#assignmentLevel').value,requirements:{records:Number($('#assignmentRecords').value)||1,components:4,blocks:4}};
     try{
       if(CLOUD_MODE){if(!state.currentClassId)throw new Error('Choose a class first.');assignment.id=await cloudSaveAssignment(state.currentClassId,assignment)}
       else saveAssignments();
@@ -670,6 +709,7 @@ function connectComponent(componentId,fieldId){
     if(b.type==='next_record'||b.type==='prev_record') output.push({id:`b_${Date.now()}_${Math.random().toString(36).slice(2,5)}`,type:'set_field',target:componentId,field:fieldId});
   }
   state.project.program=output;
+  state.project.blocklyState=null;
 }
 function connectionsFor(componentId){
   const fields=[...new Set(state.project.program.filter(b=>b.type==='set_field'&&b.target===componentId).map(b=>nameOfField(b.field)))];
@@ -695,7 +735,7 @@ function checklist(){
 function checklistBadges(){return checklist().map(x=>`<span class="tag ${x.ok?'tag-good':''}">${x.ok?'✓':'○'} ${x.label}</span>`).join('')}
 function projectProgress(){const c=checklist();return Math.round(c.filter(x=>x.ok).length/c.length*100)}
 
-function startTest(withRender=true){state.currentRecord=0;state.testLogs=[];log('Screen1 opened','good');runEvent('open');if(withRender)render()}
+function startTest(withRender=true){state.currentRecord=0;state.testLogs=[];state.tutorialTested=true;log('Screen1 opened','good');runEvent('open');if(withRender)render()}
 function bindTest(){
   $('[data-action="restart-test"]').onclick=()=>startTest(true);
   $$('.screen-component[data-test-component] button').forEach(btn=>btn.onclick=()=>{const id=btn.closest('[data-test-component]').dataset.testComponent;log(`${nameOfComponent(id)} clicked`,'good');runEvent('click',id);render()});
@@ -706,9 +746,11 @@ function runEvent(kind,component=null){
     if(b.type==='event_open'){active=kind==='open';continue}
     if(b.type==='event_click'){active=kind==='click'&&b.component===component;continue}
     if(!active)continue;
+    if(b.type==='first_record'){state.currentRecord=0;log('Moved to first record','good')}
     if(b.type==='next_record'){if(state.project.records.length){state.currentRecord=(state.currentRecord+1)%state.project.records.length;log(`Moved to record ${state.currentRecord+1}`,'good')}}
     if(b.type==='prev_record'){if(state.project.records.length){state.currentRecord=(state.currentRecord-1+state.project.records.length)%state.project.records.length;log(`Moved to record ${state.currentRecord+1}`,'good')}}
     if(b.type==='set_field') applyField(b.target,b.field);
+    if(b.type==='set_text') applyText(b.target,b.text);
   }
 }
 function applyField(targetId,fieldId){
@@ -718,6 +760,7 @@ function applyField(targetId,fieldId){
   if(c.type==='image') c.src=String(value); else if(c.type==='list'){} else c.text=String(value);
   log(`${c.name} ← ${f.name} from current record`,'good');
 }
+function applyText(targetId,text){const c=state.project.components.find(x=>x.id===targetId);if(!c){log('A text block is missing its component.','warn');return}if(c.type!=='image')c.text=String(text||'');log(`${c.name} text updated`,'good')}
 function log(text,kind=''){state.testLogs.push({text,kind});if(state.testLogs.length>18)state.testLogs.shift()}
 
 function generateCode(){
@@ -725,9 +768,11 @@ function generateCode(){
     return state.project.program.map(b=>{
       if(b.type==='event_open')return 'WHEN the screen opens:';
       if(b.type==='event_click')return `WHEN ${nameOfComponent(b.component)} is clicked:`;
+      if(b.type==='first_record')return '    Move to the first database record';
       if(b.type==='next_record')return '    Move to the next database record';
       if(b.type==='prev_record')return '    Move to the previous database record';
       if(b.type==='set_field')return `    Put ${nameOfField(b.field)} into ${nameOfComponent(b.target)}`;
+      if(b.type==='set_text')return `    Set ${nameOfComponent(b.target)} text to \"${b.text||''}\"`;
       return '';
     }).join('\n');
   }
@@ -735,9 +780,11 @@ function generateCode(){
   state.project.program.forEach(b=>{
     if(b.type==='event_open') out.push('def screen_opened():');
     if(b.type==='event_click') out.push(`\ndef ${safeName(nameOfComponent(b.component))}_clicked():`);
+    if(b.type==='first_record') out.push('    record = database.first_record()');
     if(b.type==='next_record') out.push('    record = database.next_record()');
     if(b.type==='prev_record') out.push('    record = database.previous_record()');
     if(b.type==='set_field') out.push(`    ${safeName(nameOfComponent(b.target))}.value = record["${nameOfField(b.field)}"]`);
+    if(b.type==='set_text') out.push(`    ${safeName(nameOfComponent(b.target))}.value = ${JSON.stringify(b.text||'')}`);
   });
   return out.join('\n')||'# Add some blocks to see the code idea here.';
 }
@@ -802,10 +849,15 @@ async function loadSelectedClassData(doRender=true){
       [state.assignments,state.cloudProjects]=await Promise.all([
         cloudListAssignments(state.currentClassId),listMyProjects(state.user,state.currentClassId)
       ]);
-      if(state.cloudProjects.length){
-        const p=state.cloudProjects[0];
+      const usableProjects=state.cloudProjects.filter(p=>!isLegacyDemoProject(p));
+      if(usableProjects.length){
+        const p=usableProjects[0];
         const clean=clone(p); delete clean.cloudId; delete clean.ownerUid; delete clean.ownerName; delete clean.classId; delete clean.updatedAt; delete clean.projectId;
+        if(clean.tutorialEnabled===undefined)clean.tutorialEnabled=true;
         state.project=clean; localStorage.setItem('dataapp_project',JSON.stringify(state.project));
+      }else{
+        state.project=freshBlankProject();
+        localStorage.setItem('dataapp_project',JSON.stringify(state.project));
       }
     }
   }else{
@@ -856,7 +908,7 @@ function friendlyFirebaseError(err){
   const code=err?.code||'';
   if(code.includes('popup-closed'))return 'The Google sign-in window was closed before sign-in finished.';
   if(code.includes('popup-blocked'))return 'Your browser blocked the Google sign-in window. Allow pop-ups for this site and try again.';
-  if(code.includes('permission-denied'))return 'Firebase blocked that action. Check that the V1.3 Firestore and Storage rules have been published.';
+  if(code.includes('permission-denied'))return 'Firebase blocked that action. Check that the V1.5 Firestore and Storage rules have been published.';
   if(code.includes('unauthorized-domain'))return 'This web address is not yet listed as an authorised Firebase Authentication domain.';
   return err?.message||'Something went wrong with Firebase.';
 }
