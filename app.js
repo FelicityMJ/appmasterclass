@@ -288,7 +288,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.9</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.10</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this account is not yet on the teacher allow-list.</p>
     <div class="notice"><b>Your Firebase UID</b><div class="uid-box">${escapeHtml(state.user.uid)}</div></div>
     <p class="muted">In Firestore create <b>teacherAllowlist → ${escapeHtml(state.user.uid)}</b> with the field <b>enabled = true</b>, then click Check again.</p>
@@ -298,7 +298,7 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.9 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.10 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -568,7 +568,8 @@ function componentMarkup(c,mode){
   if(c.type==='input') inner=`<input style="background:${escapeAttr(c.backgroundColor||'#ffffff')};color:${textColor}" placeholder="${escapeAttr(c.text||'Type here...')}">`;
   if(c.type==='list') inner=`<div class="listbox database-list">${listRowsMarkup(c,mode)}</div>`;
   const handles=mode==='design'&&sel?['nw','ne','sw','se'].map(pos=>`<span class="resize-handle resize-${pos}" data-resize-handle="${pos}" title="Drag to resize"></span>`).join(''):'';
-  return `<div class="screen-component ${sel}" ${attrs} style="${style}">${inner}${handles}</div>`;
+  const moveHandle=mode==='design'&&sel?`<span class="move-handle" data-move-handle title="Drag to move">✥</span>`:'';
+  return `<div class="screen-component ${sel}" ${attrs} style="${style}">${inner}${moveHandle}${handles}</div>`;
 }
 
 function blockTutorialCard(){
@@ -843,6 +844,26 @@ function pruneProgram(deletedIds=new Set(),deletedPage=''){
   }
   state.project.program=kept;state.project.blocklyState=null;state.project.blocklyPages={};
 }
+function applyDesignPropPreview(c){
+  if(!c)return;
+  const el=document.querySelector(`.screen-component[data-component="${CSS.escape(c.id)}"]`);
+  if(!el)return;
+  if(Number.isFinite(Number(c.w)))el.style.width=`${Number(c.w)}px`;
+  if(Number.isFinite(Number(c.h)))el.style.height=`${Number(c.h)}px`;
+  if(c.type==='label'){
+    const node=el.querySelector('.label');
+    if(node){node.textContent=c.text||'Label';node.style.fontSize=`${c.fontSize||16}px`;node.style.textAlign=c.align||'left';node.style.color=c.textColor||'#172033';node.style.background=c.backgroundColor||'transparent';}
+  }
+  if(c.type==='button'){
+    const node=el.querySelector('button');
+    if(node){node.textContent=c.text||'Button';node.style.background=c.backgroundColor||'#5b5ce2';node.style.color=c.textColor||'#ffffff';}
+  }
+  if(c.type==='input'){
+    const node=el.querySelector('input');
+    if(node){node.placeholder=c.text||'Type here...';node.style.background=c.backgroundColor||'#ffffff';node.style.color=c.textColor||'#172033';}
+  }
+}
+
 function bindDesign(){
   $$('[data-page-select]').forEach(b=>b.onclick=()=>{state.currentPageId=b.dataset.pageSelect;state.selectedComponent=null;saveProject();render()});
   const addPage=$('[data-action="add-page"]');if(addPage)addPage.onclick=()=>{
@@ -872,6 +893,12 @@ function bindDesign(){
       el.onpointerup=()=>{el.onpointermove=null;saveProject();render()};
     };
   });
+  $$('[data-move-handle]').forEach(handle=>handle.onpointerdown=e=>{
+    e.preventDefault();e.stopPropagation();const el=handle.closest('.screen-component'),c=state.project.components.find(x=>x.id===el?.dataset.component);if(!el||!c)return;
+    const startX=e.clientX,startY=e.clientY,origX=c.x,origY=c.y;const screen=el.closest('.screen');const maxW=screen.clientWidth,maxH=screen.clientHeight;handle.setPointerCapture(e.pointerId);
+    handle.onpointermove=ev=>{c.x=Math.max(0,Math.min(maxW-c.w,origX+ev.clientX-startX));c.y=Math.max(36,Math.min(maxH-c.h,origY+ev.clientY-startY));el.style.left=c.x+'px';el.style.top=c.y+'px'};
+    handle.onpointerup=()=>{handle.onpointermove=null;saveProject()};
+  });
   $$('[data-resize-handle]').forEach(handle=>handle.onpointerdown=e=>{
     e.preventDefault();e.stopPropagation();const el=handle.closest('.screen-component'),c=state.project.components.find(x=>x.id===el?.dataset.component);if(!el||!c)return;
     const corner=handle.dataset.resizeHandle,startX=e.clientX,startY=e.clientY,start={x:c.x,y:c.y,w:c.w,h:c.h};const screen=el.closest('.screen');const maxW=screen.clientWidth,maxH=screen.clientHeight;handle.setPointerCapture(e.pointerId);
@@ -879,7 +906,15 @@ function bindDesign(){
     handle.onpointerup=()=>{handle.onpointermove=null;saveProject();render()};
   });
   $$('[data-page-prop]').forEach(inp=>inp.oninput=()=>{const pg=currentPage();if(!pg)return;pg[inp.dataset.pageProp]=inp.value;saveProject();const screen=$('.screen[data-page-id="'+CSS.escape(pg.id)+'"]');if(screen)screen.style.background=inp.value;});
-  $$('[data-prop]').forEach(inp=>inp.oninput=()=>{const c=state.project.components.find(x=>x.id===state.selectedComponent);let v=inp.value;if(['w','h','fontSize'].includes(inp.dataset.prop))v=Number(v);c[inp.dataset.prop]=v;saveProject();render()});
+  $$('[data-prop]').forEach(inp=>{
+    const update=()=>{
+      const c=state.project.components.find(x=>x.id===state.selectedComponent);if(!c)return;const prop=inp.dataset.prop;let v=inp.value;
+      if(['w','h','fontSize'].includes(prop)){if(v==='')return;v=Number(v);if(!Number.isFinite(v))return;}
+      c[prop]=v;saveProject();applyDesignPropPreview(c);
+    };
+    inp.oninput=update;
+    inp.onchange=()=>{update();render()};
+  });
   $$('[data-list-prop]').forEach(inp=>inp.onchange=()=>{
     const c=state.project.components.find(x=>x.id===state.selectedComponent);if(!c||c.type!=='list')return;
     c[inp.dataset.listProp]=inp.value;

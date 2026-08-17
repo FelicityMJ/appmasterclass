@@ -430,14 +430,13 @@ export async function publishProject(user, project, snapshot, icons){
   if(!s||!user) throw new Error('Sign in first.');
   if(!project?.id) throw new Error('This project does not have an ID yet.');
   let publicId=project.publish?.publicId||'';
-  if(!publicId){
-    for(let i=0;i<8;i++){
-      const candidate=makePublicId();
-      const test=await s.dbSdk.getDoc(s.dbSdk.doc(s.db,'publishedApps',candidate));
-      if(!test.exists()){publicId=candidate;break;}
-    }
-  }
-  if(!publicId) throw new Error('Could not make a unique publishing link. Try again.');
+  const isNew=!publicId;
+  // Do not probe a random unpublished document with getDoc here. Public-app rules
+  // intentionally deny reads of non-existent/unpublished IDs, so that uniqueness
+  // check itself would be rejected. A 14-character crypto-random ID has ample
+  // entropy; in the vanishingly unlikely event of a collision, Firestore's update
+  // rule rejects overwriting somebody else's snapshot and the pupil can retry.
+  if(!publicId) publicId=makePublicId();
   const pub=project.publish||{};
   const ref=s.dbSdk.doc(s.db,'publishedApps',publicId);
   const data={
@@ -452,8 +451,7 @@ export async function publishProject(user, project, snapshot, icons){
     published:true,
     updatedAt:s.dbSdk.serverTimestamp()
   };
-  const existing=await s.dbSdk.getDoc(ref);
-  if(!existing.exists()) data.publishedAt=s.dbSdk.serverTimestamp();
+  if(isNew) data.publishedAt=s.dbSdk.serverTimestamp();
   await s.dbSdk.setDoc(ref,data,{merge:true});
   return {publicId,...data};
 }

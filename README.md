@@ -1,8 +1,22 @@
-# DataApp Studio — classroom V1.9
+# DataApp Studio — classroom V1.10
 
 A child-friendly database + app builder aimed at roughly age 12–13. V1.9 keeps the multi-app, multi-page, Blockly and Android publishing foundation and adds teacher-controlled block support so pupils can build programming themselves with tutorials.
 
 
+
+
+## New in V1.10
+
+- fixed Design property inputs losing focus after every typed character;
+- text, font, colour, width and height now update the preview live without rebuilding the inspector while the pupil is typing;
+- selected components now show a purple **move grip** above them, so database Lists can be moved without stealing scroll/tap gestures from their rows;
+- kept the four corner resize handles from V1.9;
+- fixed first-time Publish permission errors caused by probing an unpublished/non-existent public ID before creating it;
+- Publish now generates a cryptographically random public ID and writes the snapshot directly, while Firestore rules still prevent overwriting another pupil's published app.
+
+No Firestore or Storage rule change is required from V1.9 if the V1.5+ publishing rules are already deployed.
+
+See `UPDATE-V1.10.md`.
 
 ## New in V1.9
 
