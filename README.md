@@ -1,13 +1,26 @@
-# DataApp Studio — classroom V1.16
+# DataApp Studio — classroom V1.17
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.16 combines multi-app classrooms, multi-page database apps, Blockly, Android publishing, differentiated programming support, teacher inspection and editable database structures.
-
-
+A child-friendly database + app builder aimed at roughly age 12–13. V1.17 combines multi-app classrooms, multi-page database apps, Blockly, Android publishing, differentiated programming support, teacher inspection, editable database structures and clearer new/returning pupil sign-in.
 
 
 
 
 
+
+
+
+
+## New in V1.17
+
+- the landing screen now separates **New pupil — Join a class**, **Returning pupil — Sign in**, and **Teacher — Sign in**;
+- choosing **New pupil** opens Google sign-in first and then immediately asks for the teacher's class code;
+- returning pupils sign in straight to their existing classes, apps and assignments without re-entering a code;
+- if a returning Google account has no class membership yet, DataApp Studio automatically opens the class-code prompt;
+- existing pupils can still use **+ Join another class** from their dashboard;
+- accidentally choosing New pupil with an existing account is safe — it simply offers the Join another class flow rather than creating a duplicate account;
+- signing out never removes class membership.
+
+No Firestore, Storage or Firebase Authentication rule change is required from V1.16.
 
 ## New in V1.16
 
@@ -112,8 +125,8 @@ See `UPDATE-V1.8.md` when upgrading an already connected V1.7 site.
 
 ## Pupil workflow
 
-1. Sign in with Google.
-2. Join a teacher's class with a six-character code (only needed once).
+1. New pupils choose **Join a class**, sign in with Google and enter the teacher's six-character code.
+2. Returning pupils choose **Sign in** and go straight back to their saved classes/apps.
 3. Open a teacher assignment or continue a saved project.
 4. **DATA** — create/edit fields and records.
 5. **DESIGN** — add labels, images, buttons, text boxes and lists.

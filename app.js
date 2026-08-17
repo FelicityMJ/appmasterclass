@@ -301,7 +301,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.16</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.17</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this account is not yet on the teacher allow-list.</p>
     <div class="notice"><b>Your Firebase UID</b><div class="uid-box">${escapeHtml(state.user.uid)}</div></div>
     <p class="muted">In Firestore create <b>teacherAllowlist → ${escapeHtml(state.user.uid)}</b> with the field <b>enabled = true</b>, then click Check again.</p>
@@ -311,18 +311,24 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.16 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.17 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
     </div>
     <div class="hero-card">
-      <h2 style="margin-top:0">${CLOUD_MODE?'Sign in to your classroom':'Firebase is not linked yet'}</h2>
-      <p class="muted" style="font-size:14px">${CLOUD_MODE?'Use your Google account. Pupils are created automatically; teacher accounts must be approved in Firestore.':'You can still preview the interface locally. Follow SETUP-FIREBASE.md to turn on real accounts and classrooms.'}</p>
+      <h2 style="margin-top:0">${CLOUD_MODE?'Choose how you want to continue':'Firebase is not linked yet'}</h2>
+      <p class="muted" style="font-size:14px">${CLOUD_MODE?'New pupils join with a class code once. Returning pupils simply sign back in to their saved classes and apps.':'You can still preview the interface locally. Follow SETUP-FIREBASE.md to turn on real accounts and classrooms.'}</p>
       ${state.authError?`<div class="notice warning">${escapeHtml(state.authError)}</div>`:''}
       <div class="role-grid">
-        <button class="role-card" ${CLOUD_MODE?'data-auth-role="pupil"':'data-role="pupil"'}><div class="role-icon">🧑‍🎓</div><div><strong>${CLOUD_MODE?'Pupil — Continue with Google':"Pupil preview"}</strong><span>${CLOUD_MODE?'Join a class and build your apps.':'Test the pupil builder locally.'}</span></div></button>
-        <button class="role-card" ${CLOUD_MODE?'data-auth-role="teacher"':'data-role="teacher"'}><div class="role-icon">🧑‍🏫</div><div><strong>${CLOUD_MODE?'Teacher — Continue with Google':"Teacher preview"}</strong><span>${CLOUD_MODE?'Create classes, assignments and shared images.':'Test the teacher screens locally.'}</span></div></button>
+        ${CLOUD_MODE?`
+        <button class="role-card" data-auth-intent="pupil-join"><div class="role-icon">✨</div><div><strong>New pupil — Join a class</strong><span>Sign up with Google, then enter your teacher's class code.</span></div></button>
+        <button class="role-card" data-auth-intent="pupil-return"><div class="role-icon">🧑‍🎓</div><div><strong>Returning pupil — Sign in</strong><span>Open your existing classes, apps and assignments.</span></div></button>
+        <button class="role-card" data-auth-intent="teacher"><div class="role-icon">🧑‍🏫</div><div><strong>Teacher — Sign in</strong><span>Manage classes, pupils, assignments and shared images.</span></div></button>
+        `:`
+        <button class="role-card" data-role="pupil"><div class="role-icon">🧑‍🎓</div><div><strong>Pupil preview</strong><span>Test the pupil builder locally.</span></div></button>
+        <button class="role-card" data-role="teacher"><div class="role-icon">🧑‍🏫</div><div><strong>Teacher preview</strong><span>Test the teacher screens locally.</span></div></button>
+        `}
       </div>
     </div>
   </div>
@@ -726,9 +732,10 @@ function bindCommon(){
     }
     state.view=state.role==='teacher'?'teacher':'pupil'; render();
   });
-  $$('[data-auth-role]').forEach(b=>b.onclick=async()=>{
-    const role=b.dataset.authRole; state.authError='';
-    sessionStorage.setItem('dataapp_auth_intent',role); localStorage.setItem('dataapp_last_role',role);
+  $$('[data-auth-intent]').forEach(b=>b.onclick=async()=>{
+    const intent=b.dataset.authIntent; state.authError='';
+    sessionStorage.setItem('dataapp_auth_intent',intent);
+    localStorage.setItem('dataapp_last_role',intent==='teacher'?'teacher':'pupil-return');
     b.disabled=true; b.querySelector('strong').textContent='Opening Google sign-in…';
     try{await signInWithGoogle()}catch(err){state.authError=friendlyFirebaseError(err);render()}
   });
@@ -1329,9 +1336,14 @@ async function finishSignedInUser(user,desiredRole){
       state.role='teacher'; state.view='teacher'; state.teacherInspectActive=false; localStorage.setItem('dataapp_last_role','teacher');
       await loadTeacherData(); render(); return;
     }
+    const joinAfterSignIn=desiredRole==='pupil-join';
     state.profile=await ensureUserProfile(user,'pupil');
-    state.role='pupil'; state.view='pupil'; localStorage.setItem('dataapp_last_role','pupil');
+    state.role='pupil'; state.view='pupil'; localStorage.setItem('dataapp_last_role','pupil-return');
     await loadPupilData(); render();
+    // A new-pupil click always leads to the class-code step. If an existing pupil
+    // accidentally uses it, the same flow simply lets them join another class.
+    // A returning account with no memberships is also guided to the code prompt.
+    if(joinAfterSignIn || !state.classes.length) setTimeout(()=>showJoinClassModal(),0);
   }catch(err){state.authError=friendlyFirebaseError(err);state.view='landing';render()}
 }
 
@@ -1432,7 +1444,7 @@ async function bootstrap(){
     await onAuthChange(async user=>{
       state.authLoading=false;state.user=user;
       if(!user){state.view='landing';state.role=null;state.profile=null;state.classes=[];state.currentClass=null;render();return}
-      const desired=sessionStorage.getItem('dataapp_auth_intent')||localStorage.getItem('dataapp_last_role')||'pupil';
+      const desired=sessionStorage.getItem('dataapp_auth_intent')||localStorage.getItem('dataapp_last_role')||'pupil-return';
       sessionStorage.removeItem('dataapp_auth_intent');
       await finishSignedInUser(user,desired);
     });
