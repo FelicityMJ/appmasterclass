@@ -100,7 +100,8 @@ export async function createClass(name, user){
     teacherName:user.displayName||'',
     joinCode:code,
     createdAt:s.dbSdk.serverTimestamp(),
-    updatedAt:s.dbSdk.serverTimestamp()
+    updatedAt:s.dbSdk.serverTimestamp(),
+    updatedAtMs:Date.now()
   });
   await s.dbSdk.setDoc(s.dbSdk.doc(s.db,'joinCodes',code),{
     classId:classRef.id,
@@ -226,7 +227,8 @@ export async function saveProjectToCloud(project, user, classId){
     projectId:project.id,
     ownerUid:user.uid,
     classId,
-    updatedAt:s.dbSdk.serverTimestamp()
+    updatedAt:s.dbSdk.serverTimestamp(),
+    updatedAtMs:Date.now()
   }, {merge:true});
   return cloudId;
 }
@@ -253,6 +255,14 @@ export async function loadProjectFromCloud(cloudId){
   if(!s) return null;
   const snap = await s.dbSdk.getDoc(s.dbSdk.doc(s.db,'projects',cloudId));
   return snap.exists() ? {cloudId:snap.id,...snap.data()} : null;
+}
+
+export async function deleteProjectFromCloud(user, projectId){
+  const s=await initFirebaseServices();
+  if(!s||!user) throw new Error('Sign in first.');
+  if(!projectId) throw new Error('Choose an app first.');
+  const cloudId=`${user.uid}__${projectId}`;
+  await s.dbSdk.deleteDoc(s.dbSdk.doc(s.db,'projects',cloudId));
 }
 
 export async function listPersonalImages(user){

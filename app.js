@@ -7,7 +7,7 @@ import {
   listAssignments as cloudListAssignments, saveProjectToCloud,
   listMyProjects, listClassProjects, listPersonalImages,
   uploadPersonalImage, deletePersonalImage, listSharedImages,
-  uploadSharedImage, deleteSharedImage, uploadPublishedIcons, publishProject, unpublishProject
+  uploadSharedImage, deleteSharedImage, uploadPublishedIcons, publishProject, unpublishProject, deleteProjectFromCloud
 } from './firebase-service.js';
 import { initBlocklyEditor } from './blockly-integration.js';
 
@@ -19,6 +19,7 @@ const imageSvg = (emoji, label, bg='#eef2ff') => `data:image/svg+xml;charset=UTF
 
 
 const PERSONAL_IMAGE_LIMIT = 20;
+const MAX_PUPIL_APPS = 30;
 const PERSONAL_IMAGE_TARGET_BYTES = 80 * 1024;
 const MAX_IMAGE_DIMENSION = 800;
 
@@ -59,11 +60,18 @@ function findAsset(value){
 }
 function resolveImage(value){ return findAsset(value)?.dataUrl || value || imageSvg('🖼️','Image'); }
 function personalImageCount(){ return state.media.personal.length; }
-function imageUsage(ref){
-  let count=0;
-  state.project.records.forEach(r=>state.project.fields.filter(f=>f.type==='image').forEach(f=>{if(r[f.id]===ref)count++}));
-  state.project.components.forEach(c=>{if(c.type==='image'&&c.src===ref)count++});
+function imageUsageInProject(project,ref){
+  if(!project)return 0;let count=0;
+  (project.records||[]).forEach(r=>(project.fields||[]).filter(f=>f.type==='image').forEach(f=>{if(r[f.id]===ref)count++}));
+  (project.components||[]).forEach(c=>{if(c.type==='image'&&c.src===ref)count++});
+  if(project.publish?.icon===ref)count++;
   return count;
+}
+function imageUsage(ref){ return imageUsageInProject(state.project,ref); }
+function imageUsageAcrossApps(ref){
+  const projects=[...(state.cloudProjects||[])];
+  if(!projects.some(p=>projectIdOf(p)===projectIdOf(state.project)))projects.push(state.project);
+  return projects.reduce((sum,p)=>sum+imageUsageInProject(p,ref),0);
 }
 function clearImageRef(ref){
   state.project.records.forEach(r=>state.project.fields.filter(f=>f.type==='image').forEach(f=>{if(r[f.id]===ref)r[f.id]=''}));
@@ -143,6 +151,51 @@ function isLegacyDemoProject(project){
   return ['project-tourist','project-animals','project-music'].some(prefix=>id===prefix||id.startsWith(prefix+'-'));
 }
 
+function projectIdOf(project){ return String(project?.id||project?.projectId||''); }
+function projectTime(project){
+  if(Number(project?.updatedAtMs)) return Number(project.updatedAtMs);
+  if(Number(project?.updatedAt?.seconds)) return Number(project.updatedAt.seconds)*1000;
+  return 0;
+}
+function sortProjects(projects){ return [...(projects||[])].sort((a,b)=>projectTime(b)-projectTime(a)||String(a.name||'').localeCompare(String(b.name||''))); }
+function cleanCloudProject(project){
+  const clean=clone(project||{});
+  ['cloudId','ownerUid','ownerName','classId','updatedAt','projectId'].forEach(k=>delete clean[k]);
+  if(clean.tutorialEnabled===undefined) clean.tutorialEnabled=true;
+  return normaliseProject(clean);
+}
+function loadLocalProjects(){
+  try{
+    const saved=JSON.parse(localStorage.getItem('dataapp_projects')||'[]');
+    if(Array.isArray(saved)&&saved.length) return sortProjects(saved.filter(p=>!isLegacyDemoProject(p)).map(normaliseProject));
+    const old=JSON.parse(localStorage.getItem('dataapp_project')||'null');
+    if(old&&!isLegacyDemoProject(old)&&!isEmptyProject(old)) return [normaliseProject(old)];
+  }catch{}
+  return [];
+}
+function saveLocalProjects(){
+  if(CLOUD_MODE)return;
+  localStorage.setItem('dataapp_projects',JSON.stringify(state.cloudProjects||[]));
+}
+function syncCurrentProjectInList(){
+  if(state.role!=='pupil')return;
+  const id=projectIdOf(state.project); if(!id)return;
+  const i=(state.cloudProjects||[]).findIndex(p=>projectIdOf(p)===id);
+  if(i<0)return;
+  state.cloudProjects[i]={...clone(state.project),projectId:id,classId:state.currentClassId,ownerUid:state.user?.uid||state.cloudProjects[i]?.ownerUid||'',updatedAtMs:state.project.updatedAtMs||Date.now()};
+  state.cloudProjects=sortProjects(state.cloudProjects);
+  saveLocalProjects();
+}
+function addProjectToList(project){
+  const id=projectIdOf(project); if(!id)return;
+  const entry={...clone(project),projectId:id,classId:state.currentClassId,ownerUid:state.user?.uid||'',updatedAtMs:project.updatedAtMs||Date.now()};
+  state.cloudProjects=[entry,...(state.cloudProjects||[]).filter(p=>projectIdOf(p)!==id)];
+  state.cloudProjects=sortProjects(state.cloudProjects);
+  saveLocalProjects();
+}
+function assignmentTitle(id){ return state.assignments.find(a=>a.id===id)?.title||''; }
+function publishedStatus(project){ return project?.publish?.isPublished?'Published':'Draft'; }
+
 const defaultAssignments = [
   {id:'a-first',title:'My First Database App',template:'blank',level:'Guided',tutorialMode:'guided',requirements:{records:3,components:4,blocks:4}}
 ];
@@ -181,7 +234,7 @@ const state = {
   currentClass:null,
   members:[],
   classProjects:[],
-  cloudProjects:[],
+  cloudProjects:CLOUD_MODE?[]:loadLocalProjects(),
   cloudStatus:CLOUD_MODE?'Waiting for sign-in':'Local preview mode',
   authError:''
 };
@@ -192,7 +245,9 @@ function loadProject(){
   catch { return freshBlankProject(); }
 }
 function saveProject(){
+  state.project.updatedAtMs=Date.now();
   localStorage.setItem('dataapp_project',JSON.stringify(state.project));
+  syncCurrentProjectInList();
   const el=$('.save-state');
   if(el) el.textContent=CLOUD_MODE&&state.user&&state.role==='pupil'&&state.currentClassId?'Saving…':'✓ Saved locally';
   if(CLOUD_MODE&&state.user&&state.role==='pupil'&&state.currentClassId){
@@ -226,7 +281,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.6</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.7</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this account is not yet on the teacher allow-list.</p>
     <div class="notice"><b>Your Firebase UID</b><div class="uid-box">${escapeHtml(state.user.uid)}</div></div>
     <p class="muted">In Firestore create <b>teacherAllowlist → ${escapeHtml(state.user.uid)}</b> with the field <b>enabled = true</b>, then click Check again.</p>
@@ -236,7 +291,7 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.6 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.7 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -271,18 +326,32 @@ function pupilView(){
     <div class="card empty-class-card"><div class="big-emoji">🏫</div><h2>Enter the class code from your teacher</h2><p class="muted">You only need to join once. The class will appear here every time you sign in.</p><button class="btn primary" data-action="join-class">Join class</button></div>
   </main></div>`;
   const cls=state.currentClass;
-  const empty=isEmptyProject(state.project);
+  const apps=sortProjects((state.cloudProjects||[]).filter(p=>!isLegacyDemoProject(p)));
   return `<div class="shell">${topbar(CLOUD_MODE?'Pupil':'Pupil preview')}<main class="page">
-    <div class="welcome"><div><h1>Hi ${escapeHtml(name)} 👋</h1><p>${cls?`You are working in <b>${escapeHtml(cls.name||cls.className||'your class')}</b>.`:'Choose an assignment or start your own app.'}</p></div><div><button class="btn" data-action="join-class">+ Join another class</button> <button class="btn primary" data-action="open-builder">${empty?'Start a blank app':'Open current project'}</button></div></div>
+    <div class="welcome"><div><h1>Hi ${escapeHtml(name)} 👋</h1><p>${cls?`You are working in <b>${escapeHtml(cls.name||cls.className||'your class')}</b>.`:'Build and keep more than one app.'}</p></div><div><button class="btn" data-action="join-class">+ Join another class</button> <button class="btn primary" data-action="new-app" ${apps.length>=MAX_PUPIL_APPS?'disabled title="Delete an old app before creating another."':''}>+ New app</button></div></div>
     ${classSwitcher()}
-    <div class="cards" style="margin-bottom:16px">
-      ${empty?`<div class="card project-card blank-project-card"><div><div class="tag" style="display:inline-block;margin-bottom:8px">BLANK CANVAS</div><h3>Build your own app from scratch</h3><p class="muted">There are no example records, screen components or blocks. The tutorial will guide you, but you create every part yourself.</p></div><button class="btn primary" data-action="open-builder">Start tutorial →</button></div>`:
-      `<div class="card project-card"><div><div class="tag" style="display:inline-block;margin-bottom:8px">CURRENT PROJECT</div><h3>${escapeHtml(state.project.name)}</h3><p class="muted">${escapeHtml(state.project.tableName)} database · ${state.project.records.length} records · ${state.project.components.length} components</p></div><div class="progress"><span style="width:${projectProgress()}%"></span></div><div class="project-meta">${checklistBadges()}</div><button class="btn primary" data-action="open-builder">Continue building →</button></div>`}
-      <div class="card"><h3>🧭 Built-in tutorial</h3><p class="muted">Follow one small step at a time. It explains database words, tells you what to click and ticks each stage when you have done it yourself.</p><div class="notice">🖼 <b>${personalImageCount()}/20</b> personal images used. Shared teacher images do not count.</div></div>
-    </div>
-    <div class="section-head"><div><h2 style="font-size:20px">Assignments from your teacher</h2><p>${state.assignments.length?'Assignments also begin with a completely blank app.':'Your teacher has not added an assignment to this class yet.'}</p></div></div>
+    <div class="section-head"><div><h2 style="font-size:22px">My Apps</h2><p>${apps.length?`Choose an app to continue. Your personal image allowance is shared across all your apps.`:'You have not created an app in this class yet.'}</p></div><div class="app-count">${apps.length}/${MAX_PUPIL_APPS} apps · 🖼 ${personalImageCount()}/20 images</div></div>
+    ${apps.length?`<div class="cards app-library">${apps.map(appCard).join('')}</div>`:`<div class="card empty-app-library"><div class="big-emoji">📱</div><h3>Create your first app</h3><p class="muted">Every app starts blank. The tutorial can guide you while you create the database, pages and Blockly yourself.</p><button class="btn primary" data-action="new-app">+ New app</button></div>`}
+    <div class="section-head app-section-gap"><div><h2 style="font-size:20px">Class Tasks</h2><p>${state.assignments.length?'Starting a task creates a new app. It never replaces one of your existing apps.':'Your teacher has not added an assignment to this class yet.'}</p></div></div>
     <div class="cards">${state.assignments.length?state.assignments.map(a=>assignmentCard(a)).join(''):'<div class="card"><div class="empty-note">No assignments yet.</div></div>'}</div>
   </main></div>`;
+}
+function appCard(project){
+  const id=projectIdOf(project), published=project?.publish?.isPublished, task=project.assignmentId?assignmentTitle(project.assignmentId):'';
+  const pages=project.pages?.length||1, records=project.records?.length||0, components=project.components?.length||0;
+  return `<div class="card project-card app-library-card">
+    <div class="app-card-top"><div><div class="project-meta"><span class="tag ${published?'tag-good':''}">${published?'✓ Published':'Draft'}</span>${task?`<span class="tag">Class task</span>`:'<span class="tag">My app</span>'}</div><h3>${escapeHtml(project.name||'Untitled app')}</h3>${task?`<p class="app-task-name">${escapeHtml(task)}</p>`:''}</div><div class="mini-app-icon">${published?'📲':'📱'}</div></div>
+    <p class="muted">${pages} page${pages===1?'':'s'} · ${records} record${records===1?'':'s'} · ${components} component${components===1?'':'s'}</p>
+    <div class="progress"><span style="width:${projectProgressFor(project)}%"></span></div>
+    <div class="app-card-actions"><button class="btn primary small" data-open-project="${escapeAttr(id)}">Open</button><button class="btn small" data-rename-project="${escapeAttr(id)}">Rename</button><button class="btn small" data-duplicate-project="${escapeAttr(id)}">Duplicate</button><button class="btn small danger-soft" data-delete-project="${escapeAttr(id)}">Delete</button></div>
+  </div>`;
+}
+function projectProgressFor(project){
+  const hasEvent=(project.program||[]).some(b=>['event_open','event_click','event_list_click'].includes(b.type));
+  const connected=(project.program||[]).some(b=>b.type==='set_field');
+  const listReady=(project.components||[]).some(c=>c.type==='list'&&(c.listTitleField||c.listImageField));
+  const checks=[(project.records||[]).length>=3&&(project.fields||[]).length>=3,(project.components||[]).length>=3,(project.pages||[]).length>=2&&listReady,hasEvent,connected];
+  return Math.round(checks.filter(Boolean).length/checks.length*100);
 }
 function teacherView(){
   if(!state.classes.length) return `<div class="shell">${topbar(CLOUD_MODE?'Teacher':'Teacher preview')}<main class="page">
@@ -290,7 +359,8 @@ function teacherView(){
     <div class="card empty-class-card"><div class="big-emoji">🏫</div><h2>No classes yet</h2><p class="muted">Create a class, give pupils the six-character code, and they can join with Google sign-in.</p><button class="btn primary" data-action="create-class">Create my first class</button></div>
   </main></div>`;
   const cls=state.currentClass||state.classes.find(c=>c.id===state.currentClassId)||state.classes[0];
-  const projectByUid=new Map(); state.classProjects.forEach(p=>{const old=projectByUid.get(p.ownerUid);if(!old)projectByUid.set(p.ownerUid,p)});
+  const projectByUid=new Map(), projectCountByUid=new Map();
+  sortProjects(state.classProjects).forEach(p=>{projectCountByUid.set(p.ownerUid,(projectCountByUid.get(p.ownerUid)||0)+1);if(!projectByUid.has(p.ownerUid))projectByUid.set(p.ownerUid,p)});
   return `<div class="shell">${topbar(CLOUD_MODE?'Teacher':'Teacher preview')}<main class="page">
     <div class="welcome"><div><h1>Your classrooms</h1><p>${escapeHtml(cls?.name||'Class')} · ${state.members.length} pupil${state.members.length===1?'':'s'}</p></div><div><button class="btn" data-action="manage-bank">🖼 Manage Image Bank</button> <button class="btn" data-action="create-class">+ Create class</button> <button class="btn primary" data-action="new-assignment">+ New assignment</button></div></div>
     ${classSwitcher()}
@@ -302,8 +372,8 @@ function teacherView(){
     <div class="section-head"><div><h2 style="font-size:19px">Assignments</h2><p>These appear automatically on pupils' dashboards.</p></div></div>
     <div class="cards" style="margin-bottom:16px">${state.assignments.length?state.assignments.map(a=>`<div class="card"><div class="tag">${escapeHtml(a.level||'Guided')}</div><h3>${escapeHtml(a.title)}</h3><p class="muted">${a.requirements?.records||1}+ records · ${a.requirements?.components||4}+ components · ${a.requirements?.blocks||4}+ blocks</p><button class="btn small" data-start-assignment="${escapeAttr(a.id)}">Preview task</button></div>`).join(''):'<div class="card"><div class="empty-note">No assignments yet. Click + New assignment.</div></div>'}</div>
     <div class="card"><div class="section-head"><div><h2 style="font-size:19px">Pupils & projects</h2><p>Real members and saved projects from Firestore.</p></div></div>
-      <table class="class-table"><thead><tr><th>Pupil</th><th>Email</th><th>Latest project</th><th>Data</th><th>Design</th><th>Blocks</th><th></th></tr></thead><tbody>
-      ${state.members.length?state.members.map(m=>{const p=projectByUid.get(m.uid||m.id);return `<tr><td>${escapeHtml(m.displayName||'Pupil')}</td><td>${escapeHtml(m.email||'')}</td><td>${escapeHtml(p?.name||'Not started')}</td><td>${p?p.records?.length||0:'—'}</td><td>${p?p.components?.length||0:'—'}</td><td>${p?p.program?.length||0:'—'}</td><td><button class="btn small" data-remove-member="${escapeAttr(m.uid||m.id)}">Remove</button></td></tr>`}).join(''):'<tr><td colspan="7"><div class="empty-note">No pupils have joined yet. Give them class code <b>'+escapeHtml(cls?.joinCode||'')+'</b>.</div></td></tr>'}
+      <table class="class-table"><thead><tr><th>Pupil</th><th>Email</th><th>Apps</th><th>Latest project</th><th>Data</th><th>Design</th><th>Blocks</th><th></th></tr></thead><tbody>
+      ${state.members.length?state.members.map(m=>{const p=projectByUid.get(m.uid||m.id);return `<tr><td>${escapeHtml(m.displayName||'Pupil')}</td><td>${escapeHtml(m.email||'')}</td><td>${projectCountByUid.get(m.uid||m.id)||0}</td><td>${escapeHtml(p?.name||'Not started')}</td><td>${p?p.records?.length||0:'—'}</td><td>${p?p.components?.length||0:'—'}</td><td>${p?p.program?.length||0:'—'}</td><td><button class="btn small" data-remove-member="${escapeAttr(m.uid||m.id)}">Remove</button></td></tr>`}).join(''):'<tr><td colspan="8"><div class="empty-note">No pupils have joined yet. Give them class code <b>'+escapeHtml(cls?.joinCode||'')+'</b>.</div></td></tr>'}
       </tbody></table>
     </div>
   </main></div>`;
@@ -591,6 +661,11 @@ function bindCommon(){
   });
   $$('[data-action="check-teacher"]').forEach(b=>b.onclick=async()=>{await finishSignedInUser(state.user,'teacher')});
   $$('[data-action="open-builder"]').forEach(b=>b.onclick=()=>{state.project=normaliseProject(state.project);state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.view='builder';state.tab='data';if(state.project.tutorialEnabled===undefined)state.project.tutorialEnabled=true;render()});
+  $$('[data-action="new-app"]').forEach(b=>b.onclick=showNewAppModal);
+  $$('[data-open-project]').forEach(b=>b.onclick=()=>openPupilProject(b.dataset.openProject));
+  $$('[data-rename-project]').forEach(b=>b.onclick=()=>renamePupilProject(b.dataset.renameProject));
+  $$('[data-duplicate-project]').forEach(b=>b.onclick=()=>duplicatePupilProject(b.dataset.duplicateProject));
+  $$('[data-delete-project]').forEach(b=>b.onclick=()=>deletePupilProject(b.dataset.deleteProject));
   $$('[data-action="back-pupil"]').forEach(b=>b.onclick=()=>{state.view=state.role==='teacher'?'teacher':'pupil';render()});
   $$('[data-start-assignment]').forEach(b=>b.onclick=()=>startAssignment(b.dataset.startAssignment));
   $$('[data-select-class]').forEach(b=>b.onclick=()=>selectClass(b.dataset.selectClass));
@@ -688,11 +763,11 @@ function showPersonalManager(){
   const wrap=document.createElement('div');wrap.className='modal-backdrop';
   const paint=()=>{wrap.innerHTML=`<div class="modal media-modal"><div class="media-modal-head"><div><h3>👤 My Images</h3><p class="muted">${personalImageCount()} / ${PERSONAL_IMAGE_LIMIT} used · uploads are compressed to around 80 KB or less.</p></div><button class="icon-btn" id="closePersonal">✕</button></div>
   <div class="media-toolbar"><button class="btn primary" id="managerUpload" ${personalImageCount()>=PERSONAL_IMAGE_LIMIT?'disabled':''}>+ Upload image</button><input id="managerFile" type="file" accept="image/*" hidden></div>
-  <div class="media-manage-grid">${state.media.personal.length?state.media.personal.map(a=>{const ref=assetRef('personal',a.id),uses=imageUsage(ref);return `<div class="manage-image"><img src="${escapeAttr(a.dataUrl)}"><div><strong>${escapeHtml(a.name)}</strong><small>${friendlyBytes(a.size)} · ${uses} use${uses===1?'':'s'} in this project</small></div><button class="btn small" data-delete-personal="${a.id}">Delete</button></div>`}).join(''):'<div class="empty-note">You have not uploaded any personal images yet.</div>'}</div>
+  <div class="media-manage-grid">${state.media.personal.length?state.media.personal.map(a=>{const ref=assetRef('personal',a.id),uses=imageUsage(ref);return `<div class="manage-image"><img src="${escapeAttr(a.dataUrl)}"><div><strong>${escapeHtml(a.name)}</strong><small>${friendlyBytes(a.size)} · ${imageUsageAcrossApps(ref)} use${imageUsageAcrossApps(ref)===1?'':'s'} across your apps</small></div><button class="btn small" data-delete-personal="${a.id}">Delete</button></div>`}).join(''):'<div class="empty-note">You have not uploaded any personal images yet.</div>'}</div>
   <div class="modal-actions"><button class="btn" id="donePersonal">Done</button></div></div>`;
   $('#closePersonal',wrap).onclick=$('#donePersonal',wrap).onclick=()=>{wrap.remove();render()};
   const up=$('#managerUpload',wrap), fi=$('#managerFile',wrap); if(up)up.onclick=()=>fi.click(); if(fi)fi.onchange=async()=>{if(!fi.files?.[0])return;up.disabled=true;up.textContent='Optimising…';try{await addPersonalImage(fi.files[0]);paint()}catch(err){alert(err.message);paint()}};
-  $$('[data-delete-personal]',wrap).forEach(b=>b.onclick=async()=>{const id=b.dataset.deletePersonal,ref=assetRef('personal',id),uses=imageUsage(ref);if(uses&&!confirm(`This image is used ${uses} time${uses===1?'':'s'} in the current project. Delete it and remove those uses?`))return;try{if(CLOUD_MODE&&state.user)await deletePersonalImage(state.user,id);state.media.personal=state.media.personal.filter(a=>a.id!==id);clearImageRef(ref);if(!CLOUD_MODE)saveMediaStore();saveProject();paint()}catch(err){alert(err.message)}});
+  $$('[data-delete-personal]',wrap).forEach(b=>b.onclick=async()=>{const id=b.dataset.deletePersonal,ref=assetRef('personal',id),uses=imageUsage(ref),allUses=imageUsageAcrossApps(ref);if(allUses>uses){alert(`This image is still used ${allUses} time${allUses===1?'':'s'} across your saved apps. Remove it from those apps before deleting it.`);return;}if(uses&&!confirm(`This image is used ${uses} time${uses===1?'':'s'} in this app. Delete it and remove those uses?`))return;try{if(CLOUD_MODE&&state.user)await deletePersonalImage(state.user,id);state.media.personal=state.media.personal.filter(a=>a.id!==id);clearImageRef(ref);if(!CLOUD_MODE)saveMediaStore();saveProject();paint()}catch(err){alert(err.message)}});
   };document.body.appendChild(wrap);paint();
 }
 function showBankManager(){
@@ -801,15 +876,53 @@ function bindBlocks(){
 
 function assignmentCard(a){
   const guided=(a.tutorialMode||'guided')!=='checklist';
-  return `<div class="card assignment-card"><div class="project-meta"><span class="tag">${escapeHtml(a.level||'Guided')}</span><span class="tag">Blank canvas</span><span class="tag">${guided?'🧭 Tutorial':'✓ Checklist'}</span></div><h3>${escapeHtml(a.title)}</h3><p class="muted">You create the database, screen and blocks yourself. No example app is copied in.</p><button class="btn" data-start-assignment="${a.id}">Start from blank →</button></div>`;
+  const attempts=(state.cloudProjects||[]).filter(p=>p.assignmentId===a.id).length;
+  return `<div class="card assignment-card"><div class="project-meta"><span class="tag">${escapeHtml(a.level||'Guided')}</span><span class="tag">Blank canvas</span><span class="tag">${guided?'🧭 Tutorial':'✓ Checklist'}</span>${attempts?`<span class="tag tag-good">${attempts} app${attempts===1?'':'s'} started</span>`:''}</div><h3>${escapeHtml(a.title)}</h3><p class="muted">Starting this task creates a new app. Your other apps are left exactly as they are.</p><button class="btn" data-start-assignment="${a.id}" ${state.cloudProjects.length>=MAX_PUPIL_APPS?'disabled':''}>${attempts?'Start another attempt':'Start new app'} →</button></div>`;
 }
 function startAssignment(id){
   const a=state.assignments.find(x=>x.id===id); if(!a)return;
+  if((state.cloudProjects||[]).length>=MAX_PUPIL_APPS){alert(`You can keep up to ${MAX_PUPIL_APPS} apps in a class. Delete an old app before starting another.`);return;}
   state.project=freshBlankProject(a.title,a.id);
   state.project.tutorialEnabled=(a.tutorialMode||'guided')!=='checklist';
+  state.project.updatedAtMs=Date.now(); addProjectToList(state.project);
   state.selectedComponent=null; state.currentRecord=0; state.currentPageId=state.project.pages[0].id; state.pageHistory=[]; state.role=state.role||'pupil';
   saveProject(); state.view='builder'; state.tab='data'; render();
 }
+function showNewAppModal(){
+  if((state.cloudProjects||[]).length>=MAX_PUPIL_APPS){alert(`You can keep up to ${MAX_PUPIL_APPS} apps in a class. Delete an old app before creating another.`);return;}
+  const wrap=document.createElement('div');wrap.className='modal-backdrop';
+  wrap.innerHTML=`<div class="modal"><h3>Create a new app</h3><div class="field"><label>App name</label><input id="newAppName" value="My New App" maxlength="50" autofocus></div><div class="field"><label>Help while I build</label><select id="newAppTutorial"><option value="guided" selected>Guided tutorial</option><option value="checklist">Checklist only</option></select></div><div class="notice">This creates a completely separate blank app. Your existing apps will not be changed.</div><div class="modal-actions"><button class="btn" id="cancelNewApp">Cancel</button><button class="btn primary" id="createNewApp">Create app</button></div></div>`;
+  document.body.appendChild(wrap);$('#cancelNewApp').onclick=()=>wrap.remove();
+  $('#createNewApp').onclick=()=>{const name=$('#newAppName').value.trim()||'My New App';state.project=freshBlankProject(name,'');state.project.tutorialEnabled=$('#newAppTutorial').value==='guided';state.project.updatedAtMs=Date.now();addProjectToList(state.project);state.currentRecord=0;state.currentPageId=state.project.pages[0].id;state.pageHistory=[];state.selectedComponent=null;wrap.remove();saveProject();state.view='builder';state.tab='data';render();};
+}
+function findPupilProject(id){ return (state.cloudProjects||[]).find(p=>projectIdOf(p)===id); }
+function openPupilProject(id){
+  const found=findPupilProject(id);if(!found)return;
+  state.project=cleanCloudProject(found);state.currentRecord=0;state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.selectedComponent=null;localStorage.setItem('dataapp_project',JSON.stringify(state.project));state.view='builder';state.tab='data';render();
+}
+async function renamePupilProject(id){
+  const found=findPupilProject(id);if(!found)return;const project=cleanCloudProject(found);const name=prompt('Rename this app:',project.name||'My App');if(name===null)return;const trimmed=name.trim();if(!trimmed)return;
+  project.name=trimmed;if(!project.publish)project.publish={};project.publish.appName=trimmed;project.updatedAtMs=Date.now();
+  const i=state.cloudProjects.findIndex(p=>projectIdOf(p)===id);state.cloudProjects[i]={...clone(project),projectId:id,classId:state.currentClassId,ownerUid:state.user?.uid||''};
+  if(projectIdOf(state.project)===id)state.project=clone(project);
+  try{if(CLOUD_MODE)await saveProjectToCloud(project,state.user,state.currentClassId);else saveLocalProjects();render();}catch(err){alert(friendlyFirebaseError(err));}
+}
+async function duplicatePupilProject(id){
+  if((state.cloudProjects||[]).length>=MAX_PUPIL_APPS){alert(`You can keep up to ${MAX_PUPIL_APPS} apps in a class. Delete an old app before duplicating one.`);return;}
+  const found=findPupilProject(id);if(!found)return;const source=cleanCloudProject(found), copy=clone(source);copy.id=`project-${Date.now()}-${Math.random().toString(36).slice(2,7)}`;copy.name=`Copy of ${source.name||'My App'}`.slice(0,50);copy.assignmentId='';copy.updatedAtMs=Date.now();copy.blocklyState=source.blocklyState?clone(source.blocklyState):null;const pub=source.publish||{};copy.publish={appName:copy.name,icon:pub.icon||'',theme:pub.theme||'#5b5ce2',orientation:pub.orientation||'portrait',isPublished:false,publicId:'',icon192:'',icon512:''};
+  addProjectToList(copy);
+  try{if(CLOUD_MODE)await saveProjectToCloud(copy,state.user,state.currentClassId);else saveLocalProjects();render();}catch(err){state.cloudProjects=state.cloudProjects.filter(p=>projectIdOf(p)!==copy.id);alert(friendlyFirebaseError(err));}
+}
+async function deletePupilProject(id){
+  const found=findPupilProject(id);if(!found)return;const project=cleanCloudProject(found);if(!confirm(`Delete “${project.name||'this app'}”? This removes the editable app and cannot be undone.`))return;
+  try{
+    if(CLOUD_MODE){if(project.publish?.publicId&&project.publish?.isPublished){try{await unpublishProject(state.user,project.publish.publicId)}catch{}}await deleteProjectFromCloud(state.user,id);}
+    state.cloudProjects=state.cloudProjects.filter(p=>projectIdOf(p)!==id);saveLocalProjects();
+    if(projectIdOf(state.project)===id){state.project=freshBlankProject();localStorage.setItem('dataapp_project',JSON.stringify(state.project));}
+    render();
+  }catch(err){alert(friendlyFirebaseError(err));}
+}
+
 function showAssignmentModal(){
   const wrap=document.createElement('div');wrap.className='modal-backdrop';
   wrap.innerHTML=`<div class="modal"><h3>Create an assignment</h3>
@@ -1022,12 +1135,10 @@ async function loadSelectedClassData(doRender=true){
       [state.assignments,state.cloudProjects]=await Promise.all([
         cloudListAssignments(state.currentClassId),listMyProjects(state.user,state.currentClassId)
       ]);
-      const usableProjects=state.cloudProjects.filter(p=>!isLegacyDemoProject(p));
-      if(usableProjects.length){
-        const p=usableProjects[0];
-        const clean=clone(p); delete clean.cloudId; delete clean.ownerUid; delete clean.ownerName; delete clean.classId; delete clean.updatedAt; delete clean.projectId;
-        if(clean.tutorialEnabled===undefined)clean.tutorialEnabled=true;
-        state.project=normaliseProject(clean); state.currentPageId=state.project.pages[0]?.id||'screen1'; state.pageHistory=[]; localStorage.setItem('dataapp_project',JSON.stringify(state.project));
+      state.cloudProjects=sortProjects(state.cloudProjects.filter(p=>!isLegacyDemoProject(p)));
+      if(state.cloudProjects.length){
+        const clean=cleanCloudProject(state.cloudProjects[0]);
+        state.project=clean; state.currentPageId=state.project.pages[0]?.id||'screen1'; state.pageHistory=[]; localStorage.setItem('dataapp_project',JSON.stringify(state.project));
       }else{
         state.project=freshBlankProject(); state.currentPageId=state.project.pages[0].id; state.pageHistory=[];
         localStorage.setItem('dataapp_project',JSON.stringify(state.project));

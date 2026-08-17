@@ -2,6 +2,19 @@
 
 A child-friendly database + app builder aimed at roughly age 12–13. V1.6 keeps the real Blockly + Android publishing foundation and adds multi-page apps plus Thunkable-style database lists with master/detail navigation.
 
+
+## New in V1.7
+
+- **My Apps** pupil dashboard with up to 30 apps per class;
+- create, open, rename, duplicate and delete apps without affecting other projects;
+- Draft / Published status on every app card;
+- app cards show page, record and component counts;
+- teacher assignments create a new app/attempt instead of replacing an existing app;
+- assignment cards show how many apps/attempts the pupil has started;
+- 20 personal-image slots remain account-wide and can be reused across all apps;
+- teacher class table shows each pupil's app count and their latest project;
+- existing single-project V1.6 data is automatically treated as an app rather than being lost.
+
 ## Pupil workflow
 
 1. Sign in with Google.
