@@ -130,6 +130,10 @@ function normaliseProject(project){
   if(!Array.isArray(project.pages)||!project.pages.length) project.pages=[{id:'screen1',name:'Home',backgroundColor:'#ffffff'}];
   project.pages=project.pages.map((pg,i)=>({id:pg.id||`screen${i+1}`,name:pg.name||`Page ${i+1}`,backgroundColor:pg.backgroundColor||'#ffffff'}));
   const first=project.pages[0].id;
+  project.fields=Array.isArray(project.fields)?project.fields:[];
+  for(const f of project.fields){
+    if(f.type==='text') f.type='shortText';
+  }
   project.components=Array.isArray(project.components)?project.components:[];
   for(const c of project.components){
     if(!c.pageId||!project.pages.some(p=>p.id===c.pageId))c.pageId=first;
@@ -243,6 +247,9 @@ const state = {
   currentClass:null,
   members:[],
   classProjects:[],
+  teacherPupilUid:'',
+  teacherPupilName:'',
+  teacherInspectActive:false,
   pupilMember:null,
   blockSupportMode:'manual',
   blockTutorial:'overview',
@@ -285,6 +292,7 @@ function render(){
   if(state.view==='landing') root.innerHTML=landingView();
   else if(state.view==='teacher') root.innerHTML=teacherView();
   else if(state.view==='pupil') root.innerHTML=pupilView();
+  else if(state.view==='teacher-pupil') root.innerHTML=teacherPupilAppsView();
   else if(state.view==='builder') root.innerHTML=builderView();
   bindCommon();
   if(state.view==='builder') bindBuilder();
@@ -293,7 +301,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.14</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.16</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this account is not yet on the teacher allow-list.</p>
     <div class="notice"><b>Your Firebase UID</b><div class="uid-box">${escapeHtml(state.user.uid)}</div></div>
     <p class="muted">In Firestore create <b>teacherAllowlist → ${escapeHtml(state.user.uid)}</b> with the field <b>enabled = true</b>, then click Check again.</p>
@@ -303,7 +311,7 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.14 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.16 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -385,16 +393,42 @@ function teacherView(){
     <div class="cards" style="margin-bottom:16px">${state.assignments.length?state.assignments.map(a=>`<div class="card"><div class="tag">${escapeHtml(a.level||'Guided')}</div><h3>${escapeHtml(a.title)}</h3><p class="muted">${a.requirements?.records||1}+ records · ${a.requirements?.components||4}+ components · ${a.requirements?.blocks||4}+ blocks</p><button class="btn small" data-start-assignment="${escapeAttr(a.id)}">Preview task</button></div>`).join(''):'<div class="card"><div class="empty-note">No assignments yet. Click + New assignment.</div></div>'}</div>
     <div class="card"><div class="section-head"><div><h2 style="font-size:19px">Pupils & projects</h2><p>Real members and saved projects from Firestore.</p></div></div>
       <table class="class-table"><thead><tr><th>Pupil</th><th>Email</th><th>Apps</th><th>Latest project</th><th>Data</th><th>Design</th><th>Blocks</th><th>Block support</th><th></th></tr></thead><tbody>
-      ${state.members.length?state.members.map(m=>{const p=projectByUid.get(m.uid||m.id);const mode=m.blockSupportMode==='auto'?'auto':'manual';return `<tr><td>${escapeHtml(m.displayName||'Pupil')}</td><td>${escapeHtml(m.email||'')}</td><td>${projectCountByUid.get(m.uid||m.id)||0}</td><td>${escapeHtml(p?.name||'Not started')}</td><td>${p?p.records?.length||0:'—'}</td><td>${p?p.components?.length||0:'—'}</td><td>${p?p.program?.length||0:'—'}</td><td><select class="member-support-select" data-block-support="${escapeAttr(m.uid||m.id)}"><option value="manual" ${mode==='manual'?'selected':''}>Tutorial — pupil builds blocks</option><option value="auto" ${mode==='auto'?'selected':''}>Auto-add support blocks</option></select></td><td><button class="btn small" data-remove-member="${escapeAttr(m.uid||m.id)}">Remove</button></td></tr>`}).join(''):'<tr><td colspan="9"><div class="empty-note">No pupils have joined yet. Give them class code <b>'+escapeHtml(cls?.joinCode||'')+'</b>.</div></td></tr>'}
+      ${state.members.length?state.members.map(m=>{const p=projectByUid.get(m.uid||m.id);const mode=m.blockSupportMode==='auto'?'auto':'manual';return `<tr><td><button class="pupil-link" data-view-pupil="${escapeAttr(m.uid||m.id)}">${escapeHtml(m.displayName||'Pupil')}</button></td><td>${escapeHtml(m.email||'')}</td><td>${projectCountByUid.get(m.uid||m.id)||0}</td><td>${escapeHtml(p?.name||'Not started')}</td><td>${p?p.records?.length||0:'—'}</td><td>${p?p.components?.length||0:'—'}</td><td>${p?p.program?.length||0:'—'}</td><td><select class="member-support-select" data-block-support="${escapeAttr(m.uid||m.id)}"><option value="manual" ${mode==='manual'?'selected':''}>Tutorial — pupil builds blocks</option><option value="auto" ${mode==='auto'?'selected':''}>Auto-add support blocks</option></select></td><td><button class="btn small" data-view-pupil="${escapeAttr(m.uid||m.id)}">View apps</button> <button class="btn small" data-remove-member="${escapeAttr(m.uid||m.id)}">Remove</button></td></tr>`}).join(''):'<tr><td colspan="9"><div class="empty-note">No pupils have joined yet. Give them class code <b>'+escapeHtml(cls?.joinCode||'')+'</b>.</div></td></tr>'}
       </tbody></table>
     </div>
   </main></div>`;
 }
 
-function builderView(){return `<div class="builder">
-<div class="builder-head"><button class="btn small" data-action="back-pupil">← Dashboard</button><div class="project-title">${escapeHtml(state.project.name)}</div><span class="mini-progress">${projectProgress()}% ready</span><span class="save-state">${CLOUD_MODE?'Cloud project':'Saved locally'}</span><button class="btn small tutorial-toggle" data-action="toggle-tutorial">${state.project.tutorialEnabled===false?'Show tutorial':'Hide tutorial'}</button><button class="btn small" data-action="reset">Clear project</button></div>
-<div class="step-tabs">${['data','design','blocks','test','publish'].map((t,i)=>`<button class="step-tab ${state.tab===t?'active':''}" data-tab="${t}">${['1. 🗃 DATA','2. 🎨 DESIGN','3. 🧩 BLOCKS','4. ▶ TEST','5. 🚀 PUBLISH'][i]}</button>`).join('')}</div>
-${state.project.tutorialEnabled===false?'':tutorialPanel()}
+function teacherPupilAppsView(){
+  const uid=state.teacherPupilUid;
+  const member=state.members.find(m=>(m.uid||m.id)===uid);
+  const apps=sortProjects((state.classProjects||[]).filter(p=>p.ownerUid===uid));
+  const pupilName=member?.displayName||state.teacherPupilName||'Pupil';
+  return `<div class="shell">${topbar('Teacher')}<main class="page">
+    <div class="welcome"><div><button class="btn small" data-action="back-class">← Back to class</button><h1 style="margin-top:14px">${escapeHtml(pupilName)}'s apps</h1><p>${apps.length} saved app${apps.length===1?'':'s'} in ${escapeHtml(state.currentClass?.name||'this class')}. Open an app to inspect it without changing the pupil's work.</p></div></div>
+    ${apps.length?`<div class="cards teacher-pupil-apps">${apps.map(p=>teacherAppCard(p)).join('')}</div>`:`<div class="card empty-class-card"><div class="big-emoji">📱</div><h2>No apps yet</h2><p class="muted">This pupil has not saved an app in this class yet.</p></div>`}
+  </main></div>`;
+}
+function teacherAppCard(project){
+  const id=projectIdOf(project),pages=project.pages?.length||1,records=project.records?.length||0,blocks=project.program?.length||0;
+  return `<div class="card project-card"><div class="project-meta"><span class="tag ${project?.publish?.isPublished?'tag-good':''}">${project?.publish?.isPublished?'✓ Published':'Draft'}</span>${project.assignmentId?'<span class="tag">Class task</span>':'<span class="tag">Own app</span>'}</div><h3>${escapeHtml(project.name||'Untitled app')}</h3><p class="muted">${pages} page${pages===1?'':'s'} · ${records} record${records===1?'':'s'} · ${blocks} block${blocks===1?'':'s'}</p><button class="btn primary small" data-teacher-open-project="${escapeAttr(id)}">Open read-only</button></div>`;
+}
+function openTeacherPupil(uid){
+  const member=state.members.find(m=>(m.uid||m.id)===uid);state.teacherPupilUid=uid;state.teacherPupilName=member?.displayName||'Pupil';state.view='teacher-pupil';render();
+}
+function openTeacherProject(projectId){
+  const found=(state.classProjects||[]).find(p=>p.ownerUid===state.teacherPupilUid&&projectIdOf(p)===projectId);if(!found)return;
+  state.project=cleanCloudProject(found);state.teacherInspectActive=true;state.currentRecord=0;state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.selectedComponent=null;state.view='builder';state.tab='data';render();
+}
+
+function builderView(){
+  const inspect=state.teacherInspectActive&&state.role==='teacher';
+  const tabs=inspect?['data','design','blocks','test']:['data','design','blocks','test','publish'];
+  const labels={data:'1. 🗃 DATA',design:'2. 🎨 DESIGN',blocks:'3. 🧩 BLOCKS',test:'4. ▶ TEST',publish:'5. 🚀 PUBLISH'};
+  return `<div class="builder ${inspect?'teacher-inspection':''}">
+<div class="builder-head"><button class="btn small" data-action="back-pupil">← ${inspect?'Pupil apps':'Dashboard'}</button><div class="project-title">${escapeHtml(state.project.name)}</div>${inspect?`<span class="pill">Read-only teacher view</span>`:`<span class="mini-progress">${projectProgress()}% ready</span><span class="save-state">${CLOUD_MODE?'Cloud project':'Saved locally'}</span><button class="btn small tutorial-toggle" data-action="toggle-tutorial">${state.project.tutorialEnabled===false?'Show tutorial':'Hide tutorial'}</button><button class="btn small" data-action="reset">Clear project</button>`}</div>
+<div class="step-tabs">${tabs.map(t=>`<button class="step-tab ${state.tab===t?'active':''}" data-tab="${t}">${labels[t]}</button>`).join('')}</div>
+${inspect?`<div class="notice teacher-readonly-note"><b>Teacher view:</b> You can inspect Data, Design, Blocks and run Test. Nothing here saves changes to the pupil's project.</div>`:(state.project.tutorialEnabled===false?'':tutorialPanel())}
 <div class="builder-body">${state.tab==='data'?dataView():state.tab==='design'?designView():state.tab==='blocks'?blocksView():state.tab==='test'?testView():publishView()}</div>
 </div>`}
 
@@ -461,7 +495,7 @@ function dataView(){return `<div class="section-head"><div><h2>Build your databa
 </div>
 <div class="notice"><b>Database words:</b> a <b>field</b> is a column/type of information; a <b>record</b> is one complete row/item. Your first field should normally be a unique ID.</div>
 ${!state.project.fields.length?`<div class="blank-builder-state"><div class="big-emoji">🗃️</div><h3>Your database is completely empty</h3><p>Good — you are building it yourself. Start by clicking <b>+ Add field</b>. The tutorial above will guide you.</p></div>`:
-`<div class="data-wrap"><table class="data-table"><thead><tr><th class="row-num">#</th>${state.project.fields.map(f=>`<th>${escapeHtml(f.name)}<span class="data-type">${typeIcon(f.type)} ${f.type}</span></th>`).join('')}<th></th></tr></thead><tbody>${state.project.records.map((r,ri)=>`<tr><td class="row-num">${ri+1}</td>${state.project.fields.map(f=>`<td>${dataCell(f,r,ri)}</td>`).join('')}<td><button class="icon-btn" data-delete-record="${ri}" title="Delete record">✕</button></td></tr>`).join('')}</tbody></table>${!state.project.records.length?'<div class="empty-note" style="margin-top:12px">Fields created. Now click <b>+ Add record</b> and enter your own data.</div>':''}</div>`}` }
+`<div class="data-wrap"><table class="data-table"><thead><tr><th class="row-num">#</th>${state.project.fields.map(f=>`<th><div class="field-head"><div>${escapeHtml(f.name)}<span class="data-type">${typeIcon(f.type)} ${fieldTypeLabel(f.type)}</span></div><div class="field-head-actions"><button class="field-action" data-edit-field="${escapeAttr(f.id)}" title="Edit field">✎</button><button class="field-action danger" data-delete-field="${escapeAttr(f.id)}" title="Delete field">✕</button></div></div></th>`).join('')}<th></th></tr></thead><tbody>${state.project.records.map((r,ri)=>`<tr><td class="row-num">${ri+1}</td>${state.project.fields.map(f=>`<td>${dataCell(f,r,ri)}</td>`).join('')}<td><button class="icon-btn" data-delete-record="${ri}" title="Delete record">✕</button></td></tr>`).join('')}</tbody></table>${!state.project.records.length?'<div class="empty-note" style="margin-top:12px">Fields created. Now click <b>+ Add record</b> and enter your own data.</div>':''}</div>`}` }
 function ratingStars(value){
   const n=Math.max(0,Math.min(10,Number(value)||0));
   return '★'.repeat(n)+'☆'.repeat(10-n);
@@ -476,6 +510,7 @@ function dataCell(f,r,ri){
   if(f.type==='imageUrl') return `<input data-record="${ri}" data-field="${f.id}" value="${escapeAttr(value)}" type="url" placeholder="https://example.com/photo.jpg">`;
   if(f.type==='rating') return `<div class="rating-cell" data-rating-record="${ri}" data-rating-field="${f.id}"><div class="rating-stars">${Array.from({length:10},(_,i)=>`<button type="button" class="rating-star ${i<Number(value||0)?'on':''}" data-rating-value="${i+1}" title="${i+1} out of 10">★</button>`).join('')}</div><small>${Number(value)||0}/10</small></div>`;
   if(f.type==='boolean') return `<select data-record="${ri}" data-field="${f.id}"><option value="" ${value===''?'selected':''}>Choose…</option><option value="true" ${String(value)==='true'?'selected':''}>Yes</option><option value="false" ${String(value)==='false'?'selected':''}>No</option></select>`;
+  if(f.type==='longText') return `<textarea class="long-text-cell" data-record="${ri}" data-field="${f.id}" rows="4" placeholder="Enter longer text…">${escapeHtml(value)}</textarea>`;
   const type=f.type==='number'?'number':f.type==='date'?'date':'text';
   return `<input data-record="${ri}" data-field="${f.id}" value="${escapeAttr(value)}" type="${type}">`;
 }
@@ -487,7 +522,7 @@ function pageName(id){return state.project.pages.find(p=>p.id===id)?.name||'Page
 function componentsOnPage(pageId=state.currentPageId){return state.project.components.filter(c=>(c.pageId||state.project.pages[0]?.id)===pageId);}
 function fieldOptionsHtml(selected='',type='any',blank='Choose field…'){
   const fields=state.project.fields.filter(f=>type==='image'?['image','imageUrl'].includes(f.type):type==='text'?!['image','imageUrl'].includes(f.type):true);
-  return `<option value="">${blank}</option>`+fields.map(f=>`<option value="${f.id}" ${f.id===selected?'selected':''}>${escapeHtml(f.name)} · ${escapeHtml(f.type)}</option>`).join('');
+  return `<option value="">${blank}</option>`+fields.map(f=>`<option value="${f.id}" ${f.id===selected?'selected':''}>${escapeHtml(f.name)} · ${escapeHtml(fieldTypeLabel(f.type))}</option>`).join('');
 }
 function pageOptionsHtml(selected='',exclude=''){
   return `<option value="">Choose page…</option>`+state.project.pages.filter(p=>p.id!==exclude).map(p=>`<option value="${p.id}" ${p.id===selected?'selected':''}>${escapeHtml(p.name)}</option>`).join('');
@@ -501,7 +536,7 @@ function designView(){
   </div>
   <div class="notice master-detail-note"><b>List → Details pattern:</b> Put a List on Home and design one reusable Details page. ${autoBlocksEnabled()?'Your teacher has enabled Auto-add support, so Design shortcuts can create starter Blockly for you.':'Programming stays in Blocks: you decide what happens when the user taps a row.'} The tapped row becomes the <b>selected record</b>.</div>
   <div class="design-grid">
-  <aside class="toolbox"><h3>Components</h3>${[['label','🔤','Text / Label'],['image','🖼️','Image'],['button','🔘','Button'],['input','⌨️','Text box'],['list','☷','Database List']].map(c=>`<button class="component-btn" data-add-component="${c[0]}"><span>${c[1]}</span><span>${c[2]}</span></button>`).join('')}<div class="empty-note" style="margin-top:14px"><b>Selected page:</b><br>${escapeHtml(pg?.name||'Page')}</div></aside>
+  <aside class="toolbox"><h3>Components</h3>${[['label','🔤','Text / Label'],['image','🖼️','Image'],['button','🔘','Button'],['input','📝','Scrollable text box'],['list','☷','Database List']].map(c=>`<button class="component-btn" data-add-component="${c[0]}"><span>${c[1]}</span><span>${c[2]}</span></button>`).join('')}<div class="empty-note" style="margin-top:14px"><b>Selected page:</b><br>${escapeHtml(pg?.name||'Page')}</div></aside>
   <section class="workspace-panel"><div class="device-wrap"><div class="device-switch">${[['phone','Phone'],['large','Large phone'],['tablet','Tablet']].map(d=>`<button data-device="${d[0]}" class="${state.device===d[0]?'active':''}">${d[1]}</button>`).join('')}</div>${phoneMarkup('design')}</div></section>
   <aside class="properties">${propertiesMarkup()}</aside>
   </div>`;
@@ -512,7 +547,7 @@ function propertiesMarkup(){
   if(!c){const pg=currentPage();return `<h3>${escapeHtml(pg?.name||'Page')}</h3><div class="prop-group"><label>Page background</label><div class="colour-row"><input data-page-prop="backgroundColor" type="color" value="${escapeAttr(pg?.backgroundColor||'#ffffff')}"><span>${escapeHtml(pg?.backgroundColor||'#ffffff')}</span></div></div><div class="empty-note">Click a component on ${escapeHtml(pg?.name||'this page')} to change its properties.</div>`;}
   return `<h3>${escapeHtml(c.name)}</h3>
   <div class="prop-group"><label>Name</label><input data-prop="name" value="${escapeAttr(c.name)}"></div>
-  ${c.type!=='image'&&c.type!=='list'?`<div class="prop-group"><label>Text</label><input data-prop="text" value="${escapeAttr(c.text||'')}"></div>`:''}
+  ${c.type!=='image'&&c.type!=='list'?`<div class="prop-group"><label>${c.type==='input'?'Text box content':'Text'}</label>${c.type==='input'?`<textarea data-prop="text" rows="5">${escapeHtml(c.text||'')}</textarea>`:`<input data-prop="text" value="${escapeAttr(c.text||'')}">`}</div>`:''}
   ${['label','button','input'].includes(c.type)?`<div class="prop-group colour-grid"><label>Text colour</label><input data-prop="textColor" type="color" value="${escapeAttr(c.textColor||'#172033')}"><label>Background colour</label><input data-prop="backgroundColor" type="color" value="${escapeAttr(c.backgroundColor||'#ffffff')}"></div>`:''}
   ${c.type==='image'?`<div class="prop-group"><label>Image</label><div class="property-image-preview"><img src="${escapeAttr(resolveImage(c.src))}" alt=""></div><button class="btn" style="width:100%" data-action="choose-component-image">🖼 Choose image</button></div>`:''}
   ${c.type==='label'?`<div class="prop-group"><label>Font size</label><input data-prop="fontSize" type="number" min="10" max="48" value="${c.fontSize||16}"></div><div class="prop-group"><label>Alignment</label><select data-prop="align"><option ${c.align==='left'?'selected':''}>left</option><option ${c.align==='center'?'selected':''}>center</option><option ${c.align==='right'?'selected':''}>right</option></select></div>`:''}
@@ -571,7 +606,7 @@ function componentMarkup(c,mode){
   if(c.type==='label') inner=`<div class="label" style="font-size:${c.fontSize||16}px;text-align:${c.align||'left'};color:${textColor};background:${bg}">${escapeHtml(c.text||'Label')}</div>`;
   if(c.type==='button') inner=`<button style="background:${escapeAttr(c.backgroundColor||'#5b5ce2')};color:${escapeAttr(c.textColor||'#ffffff')}">${escapeHtml(c.text||'Button')}</button>`;
   if(c.type==='image') inner=`<img src="${escapeAttr(resolveImage(c.src))}" alt="">`;
-  if(c.type==='input') inner=`<input style="background:${escapeAttr(c.backgroundColor||'#ffffff')};color:${textColor}" placeholder="${escapeAttr(c.text||'Type here...')}">`;
+  if(c.type==='input') inner=`<div class="text-box-component" style="background:${escapeAttr(c.backgroundColor||'#ffffff')};color:${textColor}">${escapeHtml(c.text||'Long text appears here')}</div>`;
   if(c.type==='list'){const transparent=(c.listBackground==='transparent'||c.listTransparent===true);inner=`<div class="listbox database-list ${transparent?'transparent-list':''}" style="${transparent?'background:transparent;':''}">${listRowsMarkup(c,mode)}</div>`;}
   const handles=mode==='design'&&sel?['nw','ne','sw','se'].map(pos=>`<span class="resize-handle resize-${pos}" data-resize-handle="${pos}" title="Drag to resize"></span>`).join(''):'';
   const moveHandle=mode==='design'&&sel?`<span class="move-handle" data-move-handle title="Drag to move">✥</span>`:'';
@@ -699,7 +734,7 @@ function bindCommon(){
   });
   $$('[data-action="home"]').forEach(b=>b.onclick=async()=>{
     if(CLOUD_MODE){try{await signOutUser()}catch(err){console.error(err)}}
-    state.view='landing';state.role=null;state.user=null;state.classes=[];state.currentClass=null;render();
+    state.view='landing';state.role=null;state.user=null;state.classes=[];state.currentClass=null;state.teacherInspectActive=false;state.teacherPupilUid='';render();
   });
   $$('[data-action="check-teacher"]').forEach(b=>b.onclick=async()=>{await finishSignedInUser(state.user,'teacher')});
   $$('[data-action="open-builder"]').forEach(b=>b.onclick=()=>{state.project=normaliseProject(state.project);state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.view='builder';state.tab='data';if(state.project.tutorialEnabled===undefined)state.project.tutorialEnabled=true;render()});
@@ -708,7 +743,10 @@ function bindCommon(){
   $$('[data-rename-project]').forEach(b=>b.onclick=()=>renamePupilProject(b.dataset.renameProject));
   $$('[data-duplicate-project]').forEach(b=>b.onclick=()=>duplicatePupilProject(b.dataset.duplicateProject));
   $$('[data-delete-project]').forEach(b=>b.onclick=()=>deletePupilProject(b.dataset.deleteProject));
-  $$('[data-action="back-pupil"]').forEach(b=>b.onclick=()=>{state.view=state.role==='teacher'?'teacher':'pupil';render()});
+  $$('[data-action="back-pupil"]').forEach(b=>b.onclick=()=>{if(state.teacherInspectActive&&state.role==='teacher'){state.teacherInspectActive=false;state.view='teacher-pupil';}else state.view=state.role==='teacher'?'teacher':'pupil';render()});
+  $$('[data-view-pupil]').forEach(b=>b.onclick=()=>openTeacherPupil(b.dataset.viewPupil));
+  $$('[data-teacher-open-project]').forEach(b=>b.onclick=()=>openTeacherProject(b.dataset.teacherOpenProject));
+  $$('[data-action="back-class"]').forEach(b=>b.onclick=()=>{state.teacherInspectActive=false;state.view='teacher';render()});
   $$('[data-start-assignment]').forEach(b=>b.onclick=()=>startAssignment(b.dataset.startAssignment));
   $$('[data-select-class]').forEach(b=>b.onclick=()=>selectClass(b.dataset.selectClass));
   $$('[data-action="create-class"]').forEach(b=>b.onclick=showCreateClassModal);
@@ -729,6 +767,13 @@ function bindCommon(){
 }
 function bindBuilder(){
   $$('[data-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab;if(state.tab==='test') startTest(false);render()});
+  if(state.teacherInspectActive&&state.role==='teacher'){
+    $$('[data-page-select]').forEach(b=>b.onclick=()=>{state.currentPageId=b.dataset.pageSelect;state.selectedComponent=null;render()});
+    $$('[data-device]').forEach(b=>b.onclick=()=>{state.device=b.dataset.device;render()});
+    if(state.tab==='blocks') bindBlocks(true);
+    if(state.tab==='test') bindTest();
+    return;
+  }
   if(state.tab==='data') bindData();
   if(state.tab==='design') bindDesign();
   if(state.tab==='blocks') bindBlocks();
@@ -747,6 +792,8 @@ function bindData(){
   $$('[data-delete-record]').forEach(b=>b.onclick=()=>{state.project.records.splice(+b.dataset.deleteRecord,1);saveProject();render()});
   const addRecord=$('[data-action="add-record"]'); if(addRecord)addRecord.onclick=()=>{if(!state.project.fields.length){alert('Add at least one field before adding a record.');return}const row={};state.project.fields.forEach(f=>row[f.id]=['number','rating'].includes(f.type)?0:f.type==='boolean'?false:'');if(state.project.fields[0]) row[state.project.fields[0].id]=nextId();state.project.records.push(row);saveProject();render()};
   $('[data-action="add-field"]').onclick=()=>showFieldModal();
+  $$('[data-edit-field]').forEach(b=>b.onclick=()=>showEditFieldModal(b.dataset.editField));
+  $$('[data-delete-field]').forEach(b=>b.onclick=()=>deleteField(b.dataset.deleteField));
   const projectName=$('#projectNameInput'); if(projectName)projectName.oninput=()=>{state.project.name=projectName.value;if(!state.project.publish)state.project.publish={};state.project.publish.appName=projectName.value;saveProject()};
   const tableName=$('#tableNameInput'); if(tableName)tableName.oninput=()=>{state.project.tableName=tableName.value;saveProject()};
 }
@@ -791,22 +838,37 @@ function mediaCard(asset,scope,selected=''){
   return `<button class="media-card ${active}" data-media-ref="${escapeAttr(ref)}"><img src="${escapeAttr(asset.dataUrl)}" alt=""><span>${escapeHtml(asset.name)}</span><small>${escapeHtml(asset.category||'Image')}${asset.size?` · ${friendlyBytes(asset.size)}`:''}</small></button>`;
 }
 function showMediaPicker({title='Choose an image',selected='',onSelect,iconMode=false}){
-  let tab=selected?.startsWith('asset:personal:')?'personal':'shared', query='';
+  const selectedIsUrl=!iconMode && /^https:\/\//i.test(String(selected||''));
+  let tab=selectedIsUrl?'url':selected?.startsWith('asset:personal:')?'personal':'shared', query='', urlValue=selectedIsUrl?String(selected):'';
   const wrap=document.createElement('div');wrap.className='modal-backdrop';
   const paint=()=>{
-    const source=state.media[tab].filter(a=>!query||`${a.name} ${a.category||''} ${a.tags||''}`.toLowerCase().includes(query.toLowerCase()));
-    wrap.innerHTML=`<div class="modal media-modal"><div class="media-modal-head"><div><h3>${escapeHtml(title)}</h3><p class="muted">${iconMode?'App icons do not use a personal image slot.':'Personal images: '+personalImageCount()+' / '+PERSONAL_IMAGE_LIMIT+' used.'}</p></div><button class="icon-btn" id="closeMedia">✕</button></div>
-      <div class="media-tabs"><button class="${tab==='shared'?'active':''}" data-media-tab="shared">🏫 Image Bank</button><button class="${tab==='personal'?'active':''}" data-media-tab="personal">👤 My Images (${personalImageCount()}/${PERSONAL_IMAGE_LIMIT})</button></div>
+    const source=tab==='url'?[]:state.media[tab].filter(a=>!query||`${a.name} ${a.category||''} ${a.tags||''}`.toLowerCase().includes(query.toLowerCase()));
+    const libraryPanel=tab!=='url'?`
       <div class="media-toolbar"><input id="mediaSearch" placeholder="Search images…" value="${escapeAttr(query)}"><button class="btn ${personalImageCount()>=PERSONAL_IMAGE_LIMIT?'disabled':''}" id="uploadPersonal" ${personalImageCount()>=PERSONAL_IMAGE_LIMIT?'disabled':''}>+ Upload my image</button><input type="file" id="personalFile" accept="image/*" hidden></div>
       ${personalImageCount()>=PERSONAL_IMAGE_LIMIT?'<div class="notice warning">You have reached 20 personal images. Delete an unused image or choose from the shared Image Bank.</div>':''}
-      <div class="media-grid">${source.length?source.map(a=>mediaCard(a,tab,selected)).join(''):'<div class="empty-note">No matching images.</div>'}</div>
+      <div class="media-grid">${source.length?source.map(a=>mediaCard(a,tab,selected)).join(''):'<div class="empty-note">No matching images.</div>'}</div>`:`
+      <div class="image-url-panel">
+        <div class="field"><label>Direct image web address</label><input id="imageUrlValue" type="url" placeholder="https://example.com/photo.jpg" value="${escapeAttr(urlValue)}"></div>
+        <p class="muted">Use a direct <b>https://</b> image address. The image stays hosted on that website and does not use one of your personal image slots.</p>
+        <div class="image-url-preview ${urlValue?'':'empty'}">${urlValue?`<img src="${escapeAttr(urlValue)}" alt="Image URL preview" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><div class="empty-note" style="display:none">That address could not be previewed. Check that it is a direct image link.</div>`:'<div class="empty-note">Paste an image address to preview it.</div>'}</div>
+        <button class="btn primary" id="useImageUrl" ${/^https:\/\//i.test(urlValue)?'':'disabled'}>Use this image</button>
+      </div>`;
+    wrap.innerHTML=`<div class="modal media-modal"><div class="media-modal-head"><div><h3>${escapeHtml(title)}</h3><p class="muted">${iconMode?'App icons do not use a personal image slot.':'Personal images: '+personalImageCount()+' / '+PERSONAL_IMAGE_LIMIT+' used.'}</p></div><button class="icon-btn" id="closeMedia">✕</button></div>
+      <div class="media-tabs"><button class="${tab==='shared'?'active':''}" data-media-tab="shared">🏫 Image Bank</button><button class="${tab==='personal'?'active':''}" data-media-tab="personal">👤 My Images (${personalImageCount()}/${PERSONAL_IMAGE_LIMIT})</button>${iconMode?'':`<button class="${tab==='url'?'active':''}" data-media-tab="url">🔗 Image URL</button>`}</div>
+      ${libraryPanel}
       <div class="modal-actions"><button class="btn" id="cancelMedia">Cancel</button></div></div>`;
     $('#closeMedia',wrap).onclick=$('#cancelMedia',wrap).onclick=()=>wrap.remove();
     $$('[data-media-tab]',wrap).forEach(b=>b.onclick=()=>{tab=b.dataset.mediaTab;paint()});
-    const search=$('#mediaSearch',wrap); search.oninput=()=>{query=search.value;const pos=search.selectionStart;paint();const next=$('#mediaSearch',wrap);next.focus();next.setSelectionRange(pos,pos)};
+    const search=$('#mediaSearch',wrap); if(search)search.oninput=()=>{query=search.value;const pos=search.selectionStart;paint();const next=$('#mediaSearch',wrap);next.focus();next.setSelectionRange(pos,pos)};
     $$('[data-media-ref]',wrap).forEach(b=>b.onclick=()=>{const ref=b.dataset.mediaRef;if(iconMode){const asset=findAsset(ref);onSelect?.({ref,dataUrl:asset?.dataUrl||''});}else onSelect?.(ref);wrap.remove()});
+    const urlInput=$('#imageUrlValue',wrap), useUrl=$('#useImageUrl',wrap), urlPreview=$('.image-url-preview',wrap);
+    if(urlInput)urlInput.oninput=()=>{
+      urlValue=urlInput.value.trim();const valid=/^https:\/\//i.test(urlValue);if(useUrl)useUrl.disabled=!valid;
+      window.clearTimeout(wrap.__urlPreviewTimer);wrap.__urlPreviewTimer=window.setTimeout(()=>{if(!urlPreview)return;if(!valid){urlPreview.innerHTML='<div class="empty-note">Paste an https:// image address to preview it.</div>';return;}urlPreview.innerHTML=`<img src="${escapeAttr(urlValue)}" alt="Image URL preview"><div class="empty-note" style="display:none">That address could not be previewed. Check that it is a direct image link.</div>`;const im=$('img',urlPreview);if(im)im.onerror=()=>{im.style.display='none';const note=$('.empty-note',urlPreview);if(note)note.style.display='block'};},250);
+    };
+    if(useUrl)useUrl.onclick=()=>{const value=String(urlValue||'').trim();if(!/^https:\/\//i.test(value)){alert('Please use an https:// image address.');return;}onSelect?.(value);wrap.remove()};
     const upload=$('#uploadPersonal',wrap), file=$('#personalFile',wrap);
-    if(upload)upload.onclick=()=>file.click();
+    if(upload&&file)upload.onclick=()=>file.click();
     if(file)file.onchange=async()=>{if(!file.files?.[0])return;upload.disabled=true;upload.textContent='Optimising…';try{const ref=await addPersonalImage(file.files[0]);if(iconMode){const asset=findAsset(ref);onSelect?.({ref,dataUrl:asset?.dataUrl||''});wrap.remove();}else{selected=ref;tab='personal';paint()}}catch(err){alert(err.message);paint()}};
   };
   document.body.appendChild(wrap);paint();
@@ -835,9 +897,41 @@ function showBankManager(){
 }
 
 function nextId(){const f=state.project.fields[0];if(!f) return state.project.records.length+1;return Math.max(0,...state.project.records.map(r=>Number(r[f.id])||0))+1}
+function defaultValueForType(type){return ['number','rating'].includes(type)?0:type==='boolean'?false:'';}
+function convertFieldValue(value,oldType,newType){
+  if(oldType===newType)return value;
+  if((oldType==='shortText'||oldType==='longText')&&(newType==='shortText'||newType==='longText'))return String(value??'');
+  if(newType==='number'){const n=Number(value);return Number.isFinite(n)?n:0;}
+  if(newType==='rating'){const n=Number(value);return Math.max(0,Math.min(10,Number.isFinite(n)?Math.round(n):0));}
+  if(newType==='boolean'){if(value===true||String(value).toLowerCase()==='true'||String(value).toLowerCase()==='yes'||String(value)==='1')return true;if(value===false||String(value).toLowerCase()==='false'||String(value).toLowerCase()==='no'||String(value)==='0')return false;return false;}
+  if(newType==='date')return /^\d{4}-\d{2}-\d{2}$/.test(String(value||''))?String(value):'';
+  if(['image','imageUrl'].includes(newType)||['image','imageUrl'].includes(oldType))return '';
+  return String(value??'');
+}
+function clearIncompatibleFieldConnections(fieldId,newType=null){
+  for(const c of state.project.components||[]){
+    if(c.type==='list'){
+      if(c.listImageField===fieldId && newType && !['image','imageUrl'].includes(newType))c.listImageField='';
+      if((c.listTitleField===fieldId||c.listSubtitleField===fieldId) && newType && ['image','imageUrl'].includes(newType)){if(c.listTitleField===fieldId)c.listTitleField='';if(c.listSubtitleField===fieldId)c.listSubtitleField='';}
+      if(newType===null){if(c.listImageField===fieldId)c.listImageField='';if(c.listTitleField===fieldId)c.listTitleField='';if(c.listSubtitleField===fieldId)c.listSubtitleField='';}
+    }
+  }
+}
+function showEditFieldModal(fieldId){
+  const f=state.project.fields.find(x=>x.id===fieldId);if(!f)return;
+  const wrap=document.createElement('div');wrap.className='modal-backdrop';wrap.innerHTML=`<div class="modal"><h3>Edit field</h3><div class="field"><label>Field name</label><input id="editFieldName" value="${escapeAttr(f.name)}" maxlength="40"></div><div class="field"><label>Data type</label><select id="editFieldType"><option value="shortText" ${f.type==='shortText'?'selected':''}>Short text</option><option value="longText" ${f.type==='longText'?'selected':''}>Long text</option><option value="number" ${f.type==='number'?'selected':''}>Number</option><option value="boolean" ${f.type==='boolean'?'selected':''}>Yes / No</option><option value="image" ${f.type==='image'?'selected':''}>Image upload / bank</option><option value="imageUrl" ${f.type==='imageUrl'?'selected':''}>Image link (URL)</option><option value="rating" ${f.type==='rating'?'selected':''}>Rating (1–10 stars)</option><option value="date" ${f.type==='date'?'selected':''}>Date</option></select></div><div class="notice"><b>Rename:</b> existing connections stay intact. <b>Change type:</b> DataApp Studio converts values where sensible; image-type changes clear old values.</div><div class="modal-actions"><button class="btn" id="cancelEditField">Cancel</button><button class="btn primary" id="saveEditField">Save changes</button></div></div>`;document.body.appendChild(wrap);
+  $('#cancelEditField').onclick=()=>wrap.remove();$('#saveEditField').onclick=()=>{const name=$('#editFieldName').value.trim();const newType=$('#editFieldType').value;if(!name)return;const oldType=f.type;if(newType!==oldType){state.project.records.forEach(r=>r[f.id]=convertFieldValue(r[f.id],oldType,newType));f.type=newType;clearIncompatibleFieldConnections(f.id,newType);state.project.blocklyState=null;state.project.blocklyPages={};}f.name=name;wrap.remove();saveProject();render();};
+}
+function deleteField(fieldId){
+  const f=state.project.fields.find(x=>x.id===fieldId);if(!f)return;
+  if(!confirm(`Delete the field “${f.name}”? This removes this column and its data from every record. This cannot be undone.`))return;
+  state.project.fields=state.project.fields.filter(x=>x.id!==fieldId);state.project.records.forEach(r=>delete r[fieldId]);clearIncompatibleFieldConnections(fieldId,null);
+  state.project.program=(state.project.program||[]).filter(b=>!(b.type==='set_field'&&b.field===fieldId));state.project.blocklyState=null;state.project.blocklyPages={};saveProject();render();
+}
+
 function showFieldModal(){
-  const wrap=document.createElement('div');wrap.className='modal-backdrop';wrap.innerHTML=`<div class="modal"><h3>Add a field</h3><div class="field"><label>Field name</label><input id="newFieldName" placeholder="e.g. Rating"></div><div class="field"><label>Data type</label><select id="newFieldType"><option value="text">Text</option><option value="number">Number</option><option value="boolean">Yes / No</option><option value="image">Image upload / bank</option><option value="imageUrl">Image link (URL)</option><option value="rating">Rating (1–10 stars)</option><option value="date">Date</option></select></div><div class="modal-actions"><button class="btn" id="cancelModal">Cancel</button><button class="btn primary" id="createField">Add field</button></div></div>`;document.body.appendChild(wrap);
-  $('#cancelModal').onclick=()=>wrap.remove();$('#createField').onclick=()=>{const name=$('#newFieldName').value.trim();if(!name)return;let id=name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||`field_${Date.now()}`;if(state.project.fields.some(f=>f.id===id)) id+=`_${Date.now().toString().slice(-4)}`;const type=$('#newFieldType').value;state.project.fields.push({id,name,type});state.project.records.forEach(r=>r[id]=['number','rating'].includes(type)?0:'');wrap.remove();saveProject();render()};
+  const wrap=document.createElement('div');wrap.className='modal-backdrop';wrap.innerHTML=`<div class="modal"><h3>Add a field</h3><div class="field"><label>Field name</label><input id="newFieldName" placeholder="e.g. Rating"></div><div class="field"><label>Data type</label><select id="newFieldType"><option value="shortText">Short text</option><option value="longText">Long text</option><option value="number">Number</option><option value="boolean">Yes / No</option><option value="image">Image upload / bank</option><option value="imageUrl">Image link (URL)</option><option value="rating">Rating (1–10 stars)</option><option value="date">Date</option></select></div><div class="modal-actions"><button class="btn" id="cancelModal">Cancel</button><button class="btn primary" id="createField">Add field</button></div></div>`;document.body.appendChild(wrap);
+  $('#cancelModal').onclick=()=>wrap.remove();$('#createField').onclick=()=>{const name=$('#newFieldName').value.trim();if(!name)return;let id=name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||`field_${Date.now()}`;if(state.project.fields.some(f=>f.id===id)) id+=`_${Date.now().toString().slice(-4)}`;const type=$('#newFieldType').value;state.project.fields.push({id,name,type});state.project.records.forEach(r=>r[id]=defaultValueForType(type));wrap.remove();saveProject();render()};
 }
 
 function pruneProgram(deletedIds=new Set(),deletedPage=''){
@@ -888,7 +982,7 @@ function bindDesign(){
   };
   $$('[data-add-component]').forEach(b=>b.onclick=()=>{
     const type=b.dataset.addComponent;const n=state.project.components.filter(c=>c.type===type).length+1;
-    const c={id:`${type}_${Date.now()}`,type,name:`${cap(type)}${n}`,pageId:state.currentPageId,x:30,y:75+(n*18),w:type==='image'?220:type==='list'?280:200,h:type==='image'?150:type==='label'?44:type==='list'?330:44,text:type==='button'?'Button':type==='input'?'Type here...':type==='label'?'New label':'',fontSize:18,align:'center',textColor:type==='button'?'#ffffff':'#172033',backgroundColor:type==='button'?'#5b5ce2':type==='input'?'#ffffff':'',src:type==='image'?imageSvg('🖼️','Your image'):'',listLayout:'image-title-subtitle',listImageField:'',listTitleField:'',listSubtitleField:'',listBackground:'white',listTransparent:false,navigateToPage:''};
+    const c={id:`${type}_${Date.now()}`,type,name:`${cap(type)}${n}`,pageId:state.currentPageId,x:30,y:75+(n*18),w:type==='image'?220:type==='list'?280:200,h:type==='image'?150:type==='label'?44:type==='list'?330:type==='input'?150:44,text:type==='button'?'Button':type==='input'?'Long text appears here':type==='label'?'New label':'',fontSize:18,align:'center',textColor:type==='button'?'#ffffff':'#172033',backgroundColor:type==='button'?'#5b5ce2':type==='input'?'#ffffff':'',src:type==='image'?imageSvg('🖼️','Your image'):'',listLayout:'image-title-subtitle',listImageField:'',listTitleField:'',listSubtitleField:'',listBackground:'white',listTransparent:false,navigateToPage:''};
     state.project.components.push(c);state.selectedComponent=c.id;saveProject();render()
   });
   $$('.screen-component[data-component]').forEach(el=>{
@@ -959,7 +1053,7 @@ function connectListNavigation(c){
   state.project.blocklyState=null;state.project.blocklyPages=state.project.blocklyPages||{};delete state.project.blocklyPages[c.pageId||state.project.pages[0]?.id];
 }
 
-function bindBlocks(){
+function bindBlocks(readOnly=false){
   $$('[data-block-page]').forEach(b=>b.onclick=()=>{state.currentPageId=b.dataset.blockPage;state.selectedComponent=null;render()});
   $$('[data-block-help]').forEach(b=>b.onclick=()=>{state.blockTutorial=b.dataset.blockHelp||'overview';render()});
   const host=$('#blocklyDiv');
@@ -969,7 +1063,9 @@ function bindBlocks(){
         const pageId=state.currentPageId||state.project.pages[0]?.id;
         state.blocklyWorkspace=await initBlocklyEditor({
           element:host,project:state.project,pageId,components:state.project.components,fields:state.project.fields,pages:state.project.pages,
+          readOnly,
           onChange:({blocklyState,program})=>{
+            if(readOnly)return;
             state.project.blocklyPages=state.project.blocklyPages||{};state.project.blocklyPages[pageId]=blocklyState;replaceProgramForPage(pageId,program);saveProject();
             const code=$('#generatedCode'); if(code)code.textContent=generateCode();
           }
@@ -1058,7 +1154,7 @@ function showConnectModal(){
   const fields=compatible.length?compatible:state.project.fields;
   const wrap=document.createElement('div');wrap.className='modal-backdrop';
   wrap.innerHTML=`<div class="modal"><h3>🔗 Connect ${escapeHtml(c.name)} to your database</h3><p class="muted">Choose the field this component should show. I’ll create a page-open display block for the page this component is on.</p>
-  <div class="field"><label>Database field</label><select id="connectField">${fields.map(f=>`<option value="${f.id}">${escapeHtml(f.name)} · ${escapeHtml(f.type)}</option>`).join('')}</select></div>
+  <div class="field"><label>Database field</label><select id="connectField">${fields.map(f=>`<option value="${f.id}">${escapeHtml(f.name)} · ${escapeHtml(fieldTypeLabel(f.type))}</option>`).join('')}</select></div>
   <div class="notice">This is the guided route. You can inspect or change the blocks afterwards.</div>
   <div class="modal-actions"><button class="btn" id="cancelConnect">Cancel</button><button class="btn primary" id="makeConnection">Create connection</button></div></div>`;
   document.body.appendChild(wrap);
@@ -1207,7 +1303,8 @@ function generateCode(){
 function nameOfComponent(id){return state.project.components.find(c=>c.id===id)?.name||'component'}
 function nameOfField(id){return state.project.fields.find(f=>f.id===id)?.name||'field'}
 function safeName(s){return String(s).replace(/\W+/g,'_').replace(/^\d/,'_$&')}
-function typeIcon(t){return ({text:'Aa',number:'#',boolean:'✓',image:'▧',imageUrl:'🔗',rating:'★',date:'◷'})[t]||'•'}
+function fieldTypeLabel(t){return ({shortText:'Short text',longText:'Long text',text:'Short text',number:'Number',boolean:'Yes / No',image:'Image upload / bank',imageUrl:'Image link (URL)',rating:'Rating (1–10 stars)',date:'Date'})[t]||t}
+function typeIcon(t){return ({shortText:'Aa',longText:'¶',text:'Aa',number:'#',boolean:'✓',image:'▧',imageUrl:'🔗',rating:'★',date:'◷'})[t]||'•'}
 function cap(s){return s.charAt(0).toUpperCase()+s.slice(1)}
 function escapeHtml(s){return String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}
 function escapeAttr(s){return escapeHtml(s).replace(/'/g,'&#39;')}
@@ -1229,7 +1326,7 @@ async function finishSignedInUser(user,desiredRole){
       const approved=await isApprovedTeacher(user); state.teacherApproved=approved;
       if(!approved){state.role='teacher-pending';state.view='landing';render();return}
       state.profile=await ensureUserProfile(user,'teacher');
-      state.role='teacher'; state.view='teacher'; localStorage.setItem('dataapp_last_role','teacher');
+      state.role='teacher'; state.view='teacher'; state.teacherInspectActive=false; localStorage.setItem('dataapp_last_role','teacher');
       await loadTeacherData(); render(); return;
     }
     state.profile=await ensureUserProfile(user,'pupil');

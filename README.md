@@ -1,11 +1,32 @@
-# DataApp Studio — classroom V1.14
+# DataApp Studio — classroom V1.16
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.9 keeps the multi-app, multi-page, Blockly and Android publishing foundation and adds teacher-controlled block support so pupils can build programming themselves with tutorials.
-
-
+A child-friendly database + app builder aimed at roughly age 12–13. V1.16 combines multi-app classrooms, multi-page database apps, Blockly, Android publishing, differentiated programming support, teacher inspection and editable database structures.
 
 
 
+
+
+
+
+
+## New in V1.16
+
+- teachers can click a pupil in the class table and open a **Pupil Apps** screen showing every saved app for that class;
+- teachers can open a pupil app in a clearly labelled **read-only teacher view** and inspect Data, Design, page-specific Blocks and Test without changing pupil work;
+- pupils can **rename a database field**, **change its data type**, or **delete the field** after creating it;
+- renaming a field preserves its internal field ID so existing connections continue to work;
+- changing a field type converts existing values where sensible and clears incompatible image/list connections;
+- deleting a field warns that the whole column of record data will be removed;
+- the Image picker now has **Image Bank**, **My Images**, and **Image URL** choices for fixed Image components and image-valued database cells;
+- an Image URL must use `https://` and does not consume a pupil personal-image slot.
+
+## New in V1.15
+
+- database text fields are now split into **Short text** and **Long text**;
+- existing legacy `text` fields automatically migrate to **Short text**;
+- **Long text** records use a multi-line textarea in the Data table;
+- the app **Scrollable text box** component wraps long content inside its designed width/height and scrolls vertically when needed;
+- the same long-text behaviour is preserved in Design, Test, and published Android/PWA apps.
 
 ## New in V1.14
 
@@ -106,7 +127,7 @@ See `UPDATE-V1.8.md` when upgrading an already connected V1.7 site.
 2. Create one or more classes.
 3. Give pupils the generated six-character join code.
 4. Create assignments for the selected class.
-5. See real enrolled pupils and their saved project summaries.
+5. Click a pupil to see all of their saved apps and open any app in read-only teacher view.
 6. Add curriculum-safe images to the shared Image Bank.
 7. Regenerate a join code or remove a pupil when needed.
 

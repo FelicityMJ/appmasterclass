@@ -107,13 +107,13 @@ function seedFromLegacy(workspace,program=[]){
     }
   }
 }
-export async function initBlocklyEditor({element,project,pageId,components,fields,pages,onChange}){
+export async function initBlocklyEditor({element,project,pageId,components,fields,pages,onChange,readOnly=false}){
   const Blockly=await ensureBlockly();registerBlocks();activeContext={components:components||[],fields:fields||[],pages:pages||[],pageId:pageId||pages?.[0]?.id||''};
-  const workspace=Blockly.inject(element,{toolbox,renderer:'zelos',trashcan:true,move:{scrollbars:true,drag:true,wheel:true},zoom:{controls:true,wheel:true,startScale:.9,maxScale:1.4,minScale:.55,scaleSpeed:1.1},grid:{spacing:20,length:3,colour:'#d9dceb',snap:true}});
+  const workspace=Blockly.inject(element,{toolbox:readOnly?null:toolbox,readOnly,renderer:'zelos',trashcan:!readOnly,move:{scrollbars:true,drag:!readOnly,wheel:true},zoom:{controls:true,wheel:true,startScale:.9,maxScale:1.4,minScale:.55,scaleSpeed:1.1},grid:{spacing:20,length:3,colour:'#d9dceb',snap:!readOnly}});
   const pageState=project.blocklyPages?.[activeContext.pageId];
   if(pageState){try{Blockly.serialization.workspaces.load(pageState,workspace,{recordUndo:false})}catch(err){console.warn('Could not load this page Blockly state; rebuilding from saved program.',err);seedFromLegacy(workspace,programForPage(project.program||[],activeContext.pageId))}}
   else if(project.program?.length)seedFromLegacy(workspace,programForPage(project.program,activeContext.pageId));
-  const emit=()=>{const state=Blockly.serialization.workspaces.save(workspace);const program=compileBlocklyProgram(workspace);onChange({blocklyState:state,program,pageId:activeContext.pageId})};
-  workspace.addChangeListener(event=>{if(event.isUiEvent||event.type===Blockly.Events.FINISHED_LOADING)return;window.clearTimeout(workspace.__dataAppSaveTimer);workspace.__dataAppSaveTimer=window.setTimeout(emit,120)});
+  if(!readOnly){const emit=()=>{const state=Blockly.serialization.workspaces.save(workspace);const program=compileBlocklyProgram(workspace);onChange?.({blocklyState:state,program,pageId:activeContext.pageId})};
+  workspace.addChangeListener(event=>{if(event.isUiEvent||event.type===Blockly.Events.FINISHED_LOADING)return;window.clearTimeout(workspace.__dataAppSaveTimer);workspace.__dataAppSaveTimer=window.setTimeout(emit,120)});}
   window.setTimeout(()=>Blockly.svgResize(workspace),0);return workspace;
 }

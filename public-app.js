@@ -43,6 +43,8 @@ function normaliseProject() {
   }
   project.pages = project.pages.map(page => ({...page, backgroundColor:page.backgroundColor || '#ffffff'}));
   const first = project.pages[0].id;
+  project.fields = Array.isArray(project.fields) ? project.fields : [];
+  for (const field of project.fields) if (field.type === 'text') field.type = 'shortText';
   for (const component of project.components || []) {
     if (!component.pageId) component.pageId = first;
     if (component.type === 'list') {
@@ -186,7 +188,7 @@ function componentMarkup(component) {
     inner = `<button style="background:${attr(component.backgroundColor || '#5b5ce2')};color:${attr(component.textColor || '#ffffff')}">${esc(component.text || 'Button')}</button>`;
   }
   if (component.type === 'image') inner = `<img src="${attr(component.src || '')}" alt="">`;
-  if (component.type === 'input') inner = `<input style="background:${attr(component.backgroundColor || '#ffffff')};color:${textColour}" placeholder="${attr(component.text || 'Type here...')}">`;
+  if (component.type === 'input') inner = `<div class="text-box-component" style="background:${attr(component.backgroundColor || '#ffffff')};color:${textColour}">${esc(component.text || 'Long text appears here')}</div>`;
   if (component.type === 'list') {
     const transparent = component.listBackground === 'transparent' || component.listTransparent === true;
     inner = `<div class="listbox database-list ${transparent ? 'transparent-list' : ''}" style="${transparent ? 'background:transparent;' : ''}">${listRowsMarkup(component)}</div>`;
