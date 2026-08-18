@@ -1,8 +1,6 @@
-# DataApp Studio — classroom V1.28
+# DataApp Studio — classroom V1.29
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.28 fixes published Connected Apps so saved API results appear immediately in installed iPhone/Android apps, while retaining the iPhone installation guidance from V1.27.
-
-
+A child-friendly database + app builder aimed at roughly age 12–13. V1.29 fixes duplicate teacher-dashboard action buttons so every Invite teacher and Image Bank button works reliably, while retaining all V1.28 Connected App and iPhone/Android publishing improvements.
 
 
 
@@ -17,6 +15,15 @@ A child-friendly database + app builder aimed at roughly age 12–13. V1.28 fixe
 
 
 
+
+
+
+
+## New in V1.29
+
+- fixed **Invite teacher** on the Teacher administration card: both Invite teacher buttons now open the same invitation dialog;
+- fixed the duplicate **Manage Image Bank / Add images** buttons for the same reason;
+- no Firebase rules or configuration changes are required.
 
 ## New in V1.28
 

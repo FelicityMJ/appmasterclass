@@ -387,7 +387,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.28</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.29</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this Google account has not been invited as a teacher yet.</p>
     <div class="notice"><b>Ask your DataApp Studio administrator to invite this exact Google email address.</b><div class="uid-box">${escapeHtml(state.user.email||'')}</div></div>
     <p class="muted">Once the administrator has invited the address, click <b>Check again</b>. The teacher account will be activated automatically; no Firebase UID needs to be copied.</p>
@@ -397,7 +397,7 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.28 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.29 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -1056,8 +1056,8 @@ function bindCommon(){
   $$('[data-action="join-class"]').forEach(b=>b.onclick=showJoinClassModal);
   const newAssignment=$('[data-action="new-assignment"]'); if(newAssignment)newAssignment.onclick=showAssignmentModal;
   $$('[data-manage-assignment]').forEach(b=>b.onclick=()=>showAssignmentAudienceModal(b.dataset.manageAssignment));
-  const manageBank=$('[data-action="manage-bank"]'); if(manageBank)manageBank.onclick=showBankManager;
-  const inviteTeacher=$('[data-action="invite-teacher"]'); if(inviteTeacher)inviteTeacher.onclick=showInviteTeacherModal;
+  $$('[data-action="manage-bank"]').forEach(b=>b.onclick=showBankManager);
+  $$('[data-action="invite-teacher"]').forEach(b=>b.onclick=showInviteTeacherModal);
   $$('[data-cancel-teacher-invite]').forEach(b=>b.onclick=async()=>{
     const email=b.dataset.cancelTeacherInvite;if(!confirm(`Cancel the invitation for ${email}?`))return;
     try{await cancelTeacherInvite(state.user,email);await loadTeacherAdminData();render()}catch(err){alert(friendlyFirebaseError(err))}
