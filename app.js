@@ -13,7 +13,7 @@ import {
 } from './firebase-service.js';
 import { initBlocklyEditor } from './blockly-integration.js';
 import { publicAppBaseUrl } from './public-host.js';
-import { API_CATALOG, apiServiceInfo, fetchApiData } from './api-connectors.js';
+import { API_CATALOG, apiServiceInfo, fetchApiResponse } from './api-connectors.js';
 
 const $ = (sel, root=document) => root.querySelector(sel);
 const $$ = (sel, root=document) => [...root.querySelectorAll(sel)];
@@ -156,9 +156,14 @@ function normaliseProject(project){
       if(c.type==='slider'){if(c.min===undefined)c.min=0;if(c.max===undefined)c.max=100;if(c.step===undefined)c.step=1;}
       if(c.type==='switch'&&!c.text)c.text='On / Off';
     }
+    if(['label','input','image'].includes(c.type)){
+      c.contentSource=c.contentSource||(c.apiField?'api':'fixed');
+      c.apiField=c.apiField||'';
+    }
     if(c.type==='list'){
       c.listBackground=c.listBackground||(c.listTransparent?'transparent':'white');
       c.listTransparent=c.listBackground==='transparent';
+      c.listDataSource=c.listDataSource||'database';
     }
     if(c.type==='list'){
       c.listLayout=c.listLayout||'image-title-subtitle';
@@ -224,6 +229,22 @@ function addProjectToList(project){
   saveLocalProjects();
 }
 function assignmentTitle(id){ return state.assignments.find(a=>a.id===id)?.title||''; }
+function normaliseAssignment(a){
+  a=a||{};
+  a.targetMode=a.targetMode==='selected'?'selected':'all';
+  a.pupilUids=Array.isArray(a.pupilUids)?[...new Set(a.pupilUids.filter(Boolean))]:[];
+  return a;
+}
+function assignmentVisibleToCurrentPupil(a){
+  a=normaliseAssignment(a);
+  return a.targetMode!=='selected'||a.pupilUids.includes(state.user?.uid||'');
+}
+function assignmentAudienceText(a){
+  a=normaliseAssignment(a);
+  if(a.targetMode!=='selected')return 'Whole class';
+  const n=a.pupilUids.length;
+  return `${n} selected pupil${n===1?'':'s'}`;
+}
 function publishedStatus(project){ return project?.publish?.isPublished?'Published':'Draft'; }
 
 const CAPABILITY_LEVELS = {
@@ -288,6 +309,12 @@ const state = {
   testVisibility:{},
   testVariables:{},
   testDisplayValues:{},
+  testApiRows:[],
+  apiPreview:null,
+  apiPreviewRows:[],
+  apiPreviewLoading:false,
+  apiPreviewError:'',
+  apiTestQuery:'',
   authLoading:CLOUD_MODE,
   user:null,
   profile:null,
@@ -354,7 +381,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.23</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.24</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this Google account has not been invited as a teacher yet.</p>
     <div class="notice"><b>Ask your DataApp Studio administrator to invite this exact Google email address.</b><div class="uid-box">${escapeHtml(state.user.email||'')}</div></div>
     <p class="muted">Once the administrator has invited the address, click <b>Check again</b>. The teacher account will be activated automatically; no Firebase UID needs to be copied.</p>
@@ -364,7 +391,7 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.23 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.24 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -406,13 +433,14 @@ function pupilView(){
   </main></div>`;
   const cls=state.currentClass;
   const apps=sortProjects((state.cloudProjects||[]).filter(p=>!isLegacyDemoProject(p)));
+  const visibleAssignments=(state.assignments||[]).filter(assignmentVisibleToCurrentPupil);
   return `<div class="shell">${topbar(CLOUD_MODE?'Pupil':'Pupil preview')}<main class="page">
     <div class="welcome"><div><h1>Hi ${escapeHtml(name)} 👋</h1><p>${cls?`You are working in <b>${escapeHtml(cls.name||cls.className||'your class')}</b>.`:'Build and keep more than one app.'}</p></div><div><button class="btn" data-action="join-class">+ Join another class</button> <button class="btn primary" data-action="new-app" ${apps.length>=MAX_PUPIL_APPS?'disabled title="Delete an old app before creating another."':''}>+ New app</button></div></div>
     ${classSwitcher()}
     <div class="section-head"><div><h2 style="font-size:22px">My Apps</h2><p>${apps.length?`Choose an app to continue. Your personal image allowance is shared across all your apps.`:'You have not created an app in this class yet.'}</p></div><div class="app-count">${apps.length}/${MAX_PUPIL_APPS} apps · 🖼 ${personalImageCount()}/20 images</div></div>
     ${apps.length?`<div class="cards app-library">${apps.map(appCard).join('')}</div>`:`<div class="card empty-app-library"><div class="big-emoji">📱</div><h3>Create your first app</h3><p class="muted">Every app starts blank. The tutorial can guide you while you create the database, pages and Blockly yourself.</p><button class="btn primary" data-action="new-app">+ New app</button></div>`}
-    <div class="section-head app-section-gap"><div><h2 style="font-size:20px">Class Tasks</h2><p>${state.assignments.length?'Starting a task creates a new app. It never replaces one of your existing apps.':'Your teacher has not added an assignment to this class yet.'}</p></div></div>
-    <div class="cards">${state.assignments.length?state.assignments.map(a=>assignmentCard(a)).join(''):'<div class="card"><div class="empty-note">No assignments yet.</div></div>'}</div>
+    <div class="section-head app-section-gap"><div><h2 style="font-size:20px">Class Tasks</h2><p>${visibleAssignments.length?'Starting a task creates a new app. It never replaces one of your existing apps.':'There are no assignments for you in this class yet.'}</p></div></div>
+    <div class="cards">${visibleAssignments.length?visibleAssignments.map(a=>assignmentCard(a)).join(''):'<div class="card"><div class="empty-note">No assignments for you yet.</div></div>'}</div>
   </main></div>`;
 }
 function appCard(project){
@@ -480,8 +508,8 @@ function teacherView(){
       <div class="card"><div class="muted">Assignments</div><h2 style="margin:5px 0">${state.assignments.length}</h2><div class="muted">Saved to this class</div></div>
       <div class="card"><div class="muted">Shared Image Bank</div><h2 style="margin:5px 0">${state.media.shared.filter(x=>!x.locked).length}</h2><button class="btn small" data-action="manage-bank">Add images</button></div>
     </div>
-    <div class="section-head"><div><h2 style="font-size:19px">Assignments</h2><p>These appear automatically on pupils' dashboards.</p></div></div>
-    <div class="cards" style="margin-bottom:16px">${state.assignments.length?state.assignments.map(a=>`<div class="card"><div class="project-meta"><span class="tag">${escapeHtml(a.level||'Guided')}</span><span class="tag capability-tag">${escapeHtml(capabilityLabel(a.capabilityLevel||1))}</span></div><h3>${escapeHtml(a.title)}</h3><p class="muted">${projectBrief(a.capabilityLevel||1).emoji} ${escapeHtml(projectBrief(a.capabilityLevel||1).title)} — ${escapeHtml(projectBrief(a.capabilityLevel||1).mission)}</p><p class="muted">${a.requirements?.records??1}+ records · ${a.requirements?.components??4}+ components · ${a.requirements?.blocks??4}+ blocks</p><button class="btn small" data-start-assignment="${escapeAttr(a.id)}">Preview task</button></div>`).join(''):'<div class="card"><div class="empty-note">No assignments yet. Click + New assignment.</div></div>'}</div>
+    <div class="section-head"><div><h2 style="font-size:19px">Assignments</h2><p>Release each task to the whole class or only to the pupils who are ready.</p></div></div>
+    <div class="cards" style="margin-bottom:16px">${state.assignments.length?state.assignments.map(a=>`<div class="card"><div class="project-meta"><span class="tag">${escapeHtml(a.level||'Guided')}</span><span class="tag capability-tag">${escapeHtml(capabilityLabel(a.capabilityLevel||1))}</span><span class="tag">👥 ${escapeHtml(assignmentAudienceText(a))}</span></div><h3>${escapeHtml(a.title)}</h3><p class="muted">${projectBrief(a.capabilityLevel||1).emoji} ${escapeHtml(projectBrief(a.capabilityLevel||1).title)} — ${escapeHtml(projectBrief(a.capabilityLevel||1).mission)}</p><p class="muted">${a.requirements?.records??1}+ records · ${a.requirements?.components??4}+ components · ${a.requirements?.blocks??4}+ blocks</p><div class="app-card-actions"><button class="btn small" data-start-assignment="${escapeAttr(a.id)}">Preview task</button><button class="btn small" data-manage-assignment="${escapeAttr(a.id)}">Manage pupils</button></div></div>`).join(''):'<div class="card"><div class="empty-note">No assignments yet. Click + New assignment.</div></div>'}</div>
     <div class="card"><div class="section-head"><div><h2 style="font-size:19px">Pupils & projects</h2><p>Real members and saved projects from Firestore.</p></div></div>
       <table class="class-table"><thead><tr><th>Pupil</th><th>Email</th><th>Apps</th><th>Latest project</th><th>Data</th><th>Design</th><th>Blocks</th><th>Block support</th><th></th></tr></thead><tbody>
       ${state.members.length?state.members.map(m=>{const p=projectByUid.get(m.uid||m.id);const mode=m.blockSupportMode==='auto'?'auto':'manual';return `<tr><td><button class="pupil-link" data-view-pupil="${escapeAttr(m.uid||m.id)}">${escapeHtml(m.displayName||'Pupil')}</button></td><td>${escapeHtml(m.email||'')}</td><td>${projectCountByUid.get(m.uid||m.id)||0}</td><td>${escapeHtml(p?.name||'Not started')}</td><td>${p?p.records?.length||0:'—'}</td><td>${p?p.components?.length||0:'—'}</td><td>${p?p.program?.length||0:'—'}</td><td><select class="member-support-select" data-block-support="${escapeAttr(m.uid||m.id)}"><option value="manual" ${mode==='manual'?'selected':''}>Tutorial — pupil builds blocks</option><option value="auto" ${mode==='auto'?'selected':''}>Auto-add support blocks</option></select></td><td><button class="btn small" data-view-pupil="${escapeAttr(m.uid||m.id)}">View apps</button> <button class="btn small" data-remove-member="${escapeAttr(m.uid||m.id)}">Remove</button></td></tr>`}).join(''):'<tr><td colspan="9"><div class="empty-note">No pupils have joined yet. Give them class code <b>'+escapeHtml(cls?.joinCode||'')+'</b>.</div></td></tr>'}
@@ -583,12 +611,13 @@ function tutorialSteps(){
       {tab:'test',title:'Test the value changing more than once',done:state.tutorialTested===true,text:'Run the app and press your controls repeatedly. Check the variable changes exactly as expected.',tip:'Restart resets runtime variables.'}
     ];
   }
-  const hasApiRequest=programHasType(program,'api_request'),hasApiOutput=programHasType(program,'set_from_api'),hasApiError=programHasType(program,'if_api_success');
+  const apiBound=comps.some(c=>(['label','input','image'].includes(c.type)&&c.contentSource==='api'&&c.apiField)||(c.type==='list'&&c.listDataSource==='api'&&(c.listTitleField||c.listImageField||c.listSubtitleField)));
+  const hasApiRequest=programHasType(program,'api_request'),hasApiOutput=programHasType(program,'set_from_api')||apiBound,hasApiError=programHasType(program,'if_api_success');
   return [
     {tab:'api',title:'Choose and test a live API',done:state.project.apiTested===true,text:'Open Connect, choose Live Weather, Book Search or Pokédex, then try a real request in the API tester.',tip:'Notice the JSON field names — your app will use those same result fields.'},
-    {tab:'design',title:'Build a search screen',done:comps.some(c=>c.type==='textInput')&&comps.some(c=>c.type==='button'),text:'Add a Text Input for the search, a button to send it, and labels or an image for the result.',tip:'The API does the lookup; your screen decides how the result feels to the user.'},
+    {tab:'design',title:'Build a search screen',done:comps.some(c=>c.type==='textInput')&&comps.some(c=>c.type==='button'),text:'Add a Text Input for the search, a button to send it, and Labels, an Image or a List for the result.',tip:'The API does the lookup; your screen decides how the result feels to the user.'},
     {tab:'blocks',title:'Send the API request',done:hasApiRequest,text:'In Web / API, use “ask the selected API using …” inside your search button event.',tip:'The request uses whatever the user typed into your input.'},
-    {tab:'blocks',title:'Put live results on screen',done:hasApiOutput,text:'Add “set … to API result …” blocks for at least three useful values.',tip:'Image URL results can be sent straight to an Image component.'},
+    {tab:'design',title:'Choose which API fields appear',done:hasApiOutput,text:'Select your Labels, Text boxes, Images or List and choose Connected API plus the field each one should show.',tip:'You can still use “set … to API result …” blocks later, but beginners can wire the fields visually in Design.'},
     {tab:'blocks',title:'Handle success and failure',done:hasApiError,text:'Use “if last API request worked” so a failed search gives the user a helpful response.',tip:'Real internet services can fail — good apps plan for it.'},
     {tab:'test',title:'Test a real search',done:state.tutorialTested===true,text:'Run the app with a valid search, then deliberately try something invalid.',tip:'You are now testing a real request → JSON → interface flow.'}
   ];
@@ -643,6 +672,20 @@ function fieldOptionsHtml(selected='',type='any',blank='Choose field…'){
   const fields=state.project.fields.filter(f=>type==='image'?['image','imageUrl'].includes(f.type):type==='text'?!['image','imageUrl'].includes(f.type):true);
   return `<option value="">${blank}</option>`+fields.map(f=>`<option value="${f.id}" ${f.id===selected?'selected':''}>${escapeHtml(f.name)} · ${escapeHtml(fieldTypeLabel(f.type))}</option>`).join('');
 }
+function apiFieldsForType(type='any'){
+  return apiServiceInfo(state.project.apiService).fields.filter(([key,label,kind])=>type==='image'?kind==='image':type==='text'?kind!=='image':true);
+}
+function apiFieldOptionsHtml(selected='',type='any',blank='Choose API field…'){
+  return `<option value="">${blank}</option>`+apiFieldsForType(type).map(([key,label])=>`<option value="${escapeAttr(key)}" ${key===selected?'selected':''}>${escapeHtml(label)}</option>`).join('');
+}
+function apiFieldLabel(key){return apiServiceInfo(state.project.apiService).fields.find(([k])=>k===key)?.[1]||key||'API field';}
+function applyApiListDefaults(c){const api=apiServiceInfo(state.project.apiService),d=api.listDefaults||{};c.listDataSource='api';c.listLayout=d.layout||'title-subtitle';c.listImageField=d.image||'';c.listTitleField=d.title||api.fields.find(([, ,kind])=>kind!=='image')?.[0]||'';c.listSubtitleField=d.subtitle||api.fields.filter(([, ,kind])=>kind!=='image')[1]?.[0]||'';}
+function apiBindingMarkup(c){
+  if(projectCapabilityLevel()<5||!['label','input','image'].includes(c.type))return '';
+  const isImage=c.type==='image',source=c.contentSource==='api'?'api':'fixed',compatible=apiFieldsForType(isImage?'image':'text');
+  const sample=source==='api'&&c.apiField?(state.apiPreview?.[c.apiField]??''):'';
+  return `<div class="api-binding-card"><div class="prop-section-title">Live API content</div><div class="prop-group"><label>${isImage?'Image':'Content'} source</label><select data-api-bind="contentSource"><option value="fixed" ${source==='fixed'?'selected':''}>${isImage?'My image / URL':'Fixed content'}</option><option value="api" ${source==='api'?'selected':''} ${!compatible.length?'disabled':''}>🌐 Connected API${!compatible.length?' — no matching field':''}</option></select></div>${source==='api'?`<div class="prop-group"><label>API field</label><select data-api-bind="apiField">${apiFieldOptionsHtml(c.apiField,isImage?'image':'text')}</select><small class="prop-help">${c.apiField?`Shows <b>${escapeHtml(apiFieldLabel(c.apiField))}</b> from ${escapeHtml(apiServiceInfo(state.project.apiService).name)}.${sample!==''?` Current test value: <b>${escapeHtml(String(sample))}</b>`:''}`:'This API does not provide a compatible field for this component.'}</small></div>`:''}</div>`;
+}
 function pageOptionsHtml(selected='',exclude=''){
   return `<option value="">Choose page…</option>`+state.project.pages.filter(p=>p.id!==exclude).map(p=>`<option value="${p.id}" ${p.id===selected?'selected':''}>${escapeHtml(p.name)}</option>`).join('');
 }
@@ -653,7 +696,7 @@ function componentToolsForLevel(level=projectCapabilityLevel()){
     ['image','🖼️','Image',1],
     ['button','🔘','Button',1],
     ['input','📝','Scrollable text box',1],
-    ['list','☷','Database List',1],
+    ['list','☷','List',1],
     ['textInput','⌨️','Text Input',2],
     ['numberInput','🔢','Number Input',2],
     ['dropdown','▾','Dropdown',2],
@@ -690,7 +733,7 @@ function designView(){
     <div class="page-tabs">${state.project.pages.map((p,i)=>`<button class="page-tab ${p.id===state.currentPageId?'active':''}" data-page-select="${p.id}"><span>${escapeHtml(p.name)}</span><small>Page ${i+1}</small></button>`).join('')}</div>
     <div class="page-actions"><button class="btn small" data-action="rename-page">Rename</button><button class="btn small" data-action="add-page">+ Add page</button>${state.project.pages.length>1?'<button class="btn small danger-text" data-action="delete-page">Delete page</button>':''}</div>
   </div>
-  <div class="notice master-detail-note"><b>List → Details pattern:</b> Put a List on Home and design one reusable Details page. ${autoBlocksEnabled()?'Your teacher has enabled Auto-add support, so Design shortcuts can create starter Blockly for you.':'Programming stays in Blocks: you decide what happens when the user taps a row.'} The tapped row becomes the <b>selected record</b>.</div>
+  ${projectCapabilityLevel()>=5?`<div class="notice master-detail-note"><b>Connected App design:</b> Components can take their content straight from <b>${escapeHtml(apiServiceInfo(state.project.apiService).name)}</b>. Select a Label, Text box, Image or List and choose an API field here in Design. Blocks are mainly for deciding <b>when</b> the request happens.</div>`:`<div class="notice master-detail-note"><b>List → Details pattern:</b> Put a List on Home and design one reusable Details page. ${autoBlocksEnabled()?'Your teacher has enabled Auto-add support, so Design shortcuts can create starter Blockly for you.':'Programming stays in Blocks: you decide what happens when the user taps a row.'} The tapped row becomes the <b>selected record</b>.</div>`}
   <div class="capability-banner"><div><b>${escapeHtml(capabilityLabel(projectCapabilityLevel()))}</b><span>${escapeHtml(capabilityInfo(projectCapabilityLevel()).description)}</span></div>${projectCapabilityLevel()===1?'<span class="tag">Project 1 stays simple</span>':''}</div>
   <div class="design-grid">
   <aside class="toolbox"><div class="toolbox-level"><span class="tag capability-tag">${escapeHtml(capabilityLabel(projectCapabilityLevel()))}</span><small>${escapeHtml(capabilityInfo(projectCapabilityLevel()).short)}</small></div><h3>Components</h3>${componentToolsForLevel().map(c=>`<button class="component-btn" data-add-component="${c[0]}"><span>${c[1]}</span><span>${c[2]}</span></button>`).join('')}${projectCapabilityLevel()<4?`<div class="locked-tools"><b>🔒 More tools later</b><span>Your teacher unlocks the next project level when you need it.</span></div>`:''}<div class="empty-note" style="margin-top:14px"><b>Selected page:</b><br>${escapeHtml(pg?.name||'Page')}</div></aside>
@@ -704,15 +747,16 @@ function propertiesMarkup(){
   if(!c){const pg=currentPage();return `<h3>${escapeHtml(pg?.name||'Page')}</h3><div class="prop-group"><label>Page background</label><div class="colour-row"><input data-page-prop="backgroundColor" type="color" value="${escapeAttr(pg?.backgroundColor||'#ffffff')}"><span>${escapeHtml(pg?.backgroundColor||'#ffffff')}</span></div></div><div class="empty-note">Click a component on ${escapeHtml(pg?.name||'this page')} to change its properties.</div>`;}
   return `<h3>${escapeHtml(c.name)}</h3>
   <div class="prop-group"><label>Name</label><input data-prop="name" value="${escapeAttr(c.name)}"></div>
-  ${['label','button','input'].includes(c.type)?`<div class="prop-group"><label>${c.type==='input'?'Text box content':'Text'}</label>${c.type==='input'?`<textarea data-prop="text" rows="5">${escapeHtml(c.text||'')}</textarea>`:`<input data-prop="text" value="${escapeAttr(c.text||'')}">`}</div>`:''}
+  ${apiBindingMarkup(c)}
+  ${['label','button','input'].includes(c.type)&&!(projectCapabilityLevel()>=5&&['label','input'].includes(c.type)&&c.contentSource==='api')?`<div class="prop-group"><label>${c.type==='input'?'Text box content':'Text'}</label>${c.type==='input'?`<textarea data-prop="text" rows="5">${escapeHtml(c.text||'')}</textarea>`:`<input data-prop="text" value="${escapeAttr(c.text||'')}">`}</div>`:''}
   ${['label','button','input','textInput','numberInput','dropdown','switch','slider'].includes(c.type)?`<div class="prop-group colour-grid"><label>Text colour</label><input data-prop="textColor" type="color" value="${escapeAttr(c.textColor||'#172033')}"><label>Background colour</label><input data-prop="backgroundColor" type="color" value="${escapeAttr(c.backgroundColor||'#ffffff')}"></div>`:''}
-  ${c.type==='image'?`<div class="prop-group"><label>Image</label><div class="property-image-preview"><img src="${escapeAttr(resolveImage(c.src))}" alt=""></div><button class="btn" style="width:100%" data-action="choose-component-image">🖼 Choose image</button></div>`:''}
+  ${c.type==='image'&&!(projectCapabilityLevel()>=5&&c.contentSource==='api')?`<div class="prop-group"><label>Image</label><div class="property-image-preview"><img src="${escapeAttr(resolveImage(c.src))}" alt=""></div><button class="btn" style="width:100%" data-action="choose-component-image">🖼 Choose image</button></div>`:''}
   ${interactivePropertiesMarkup(c)}
   ${c.type==='label'?`<div class="prop-group"><label>Font size</label><input data-prop="fontSize" type="number" min="10" max="48" value="${c.fontSize||16}"></div><div class="prop-group"><label>Alignment</label><select data-prop="align"><option ${c.align==='left'?'selected':''}>left</option><option ${c.align==='center'?'selected':''}>center</option><option ${c.align==='right'?'selected':''}>right</option></select></div>`:''}
   ${c.type==='list'?listPropertiesMarkup(c):''}
   ${projectCapabilityLevel()>=2?`<label class="checkbox-row"><input data-component-toggle="visible" type="checkbox" ${c.visible!==false?'checked':''}><span>Visible when app starts</span></label>`:''}
   <div class="prop-group"><label>Width</label><input data-prop="w" type="number" value="${c.w}"></div><div class="prop-group"><label>Height</label><input data-prop="h" type="number" value="${c.h}"></div>
-  ${['label','image','input'].includes(c.type)?(autoBlocksEnabled()?`<button class="btn connect" style="width:100%;margin-bottom:8px" data-action="connect-data">✨ Auto-connect Data</button><div class="connection-note">${connectionsFor(c.id)}</div>`:`<button class="btn connect" style="width:100%;margin-bottom:8px" data-program-component="${escapeAttr(c.id)}" data-program-kind="data">🧩 Program data in Blocks</button><div class="connection-note">${connectionsFor(c.id)} You add the Blockly yourself.</div>`):''}
+  ${['label','image','input'].includes(c.type)?(projectCapabilityLevel()>=5&&c.contentSource==='api'?`<div class="connection-note api-direct-note">✓ This component is already connected to <b>${escapeHtml(apiFieldLabel(c.apiField))}</b> from the live API. In Blocks you only need to decide when the API request happens.</div>`:(autoBlocksEnabled()?`<button class="btn connect" style="width:100%;margin-bottom:8px" data-action="connect-data">✨ Auto-connect Data</button><div class="connection-note">${connectionsFor(c.id)}</div>`:`<button class="btn connect" style="width:100%;margin-bottom:8px" data-program-component="${escapeAttr(c.id)}" data-program-kind="data">🧩 Program data in Blocks</button><div class="connection-note">${connectionsFor(c.id)} You add the Blockly yourself.</div>`)):''}
   ${c.type==='button'?`<button class="btn connect" style="width:100%;margin-bottom:8px" data-program-component="${escapeAttr(c.id)}" data-program-kind="button">🧩 Tell ${escapeHtml(c.name)} what to do</button><div class="connection-note">Buttons only act when you program a <b>when ${escapeHtml(c.name)} clicked</b> event in Blocks.</div>`:''}
   ${interactiveComponentType(c.type)?`<button class="btn connect" style="width:100%;margin-bottom:8px" data-program-component="${escapeAttr(c.id)}" data-program-kind="interactive">🧩 Program ${escapeHtml(c.name)}</button><div class="connection-note">Use its value in Logic, or react when it changes.</div>`:''}
   <button class="btn small" style="width:100%;color:var(--danger)" data-action="delete-component">Delete component</button>`
@@ -728,35 +772,41 @@ function listPropertiesMarkup(c){
   const needsImage=c.listLayout?.includes('image');
   const needsTitle=c.listLayout?.includes('title');
   const needsSubtitle=c.listLayout?.includes('subtitle');
+  const source=projectCapabilityLevel()>=5&&c.listDataSource==='api'?'api':'database';
+  const fieldOptions=(selected,type)=>source==='api'?apiFieldOptionsHtml(selected,type):fieldOptionsHtml(selected,type);
   return `<div class="list-props">
-    <div class="prop-section-title">Database list</div>
+    <div class="prop-section-title">List data</div>
+    <div class="prop-group"><label>Data source</label><select data-list-prop="listDataSource"><option value="database" ${source==='database'?'selected':''}>🗃 My database</option>${projectCapabilityLevel()>=5?`<option value="api" ${source==='api'?'selected':''}>🌐 ${escapeHtml(apiServiceInfo(state.project.apiService).name)}</option>`:''}</select><small class="prop-help">${source==='api'?`Rows come from the live API search. ${escapeHtml(apiServiceInfo(state.project.apiService).resultHint||'')}`:'Rows come from your local database records.'}</small></div>
     <div class="prop-group"><label>Row layout</label><select data-list-prop="listLayout">${layouts.map(([v,n])=>`<option value="${v}" ${c.listLayout===v?'selected':''}>${n}</option>`).join('')}</select></div>
-    ${needsImage?`<div class="prop-group"><label>Image field</label><select data-list-prop="listImageField">${fieldOptionsHtml(c.listImageField,'image')}</select></div>`:''}
-    ${needsTitle?`<div class="prop-group"><label>Title field</label><select data-list-prop="listTitleField">${fieldOptionsHtml(c.listTitleField,'text')}</select></div>`:''}
-    ${needsSubtitle?`<div class="prop-group"><label>Subtitle field</label><select data-list-prop="listSubtitleField">${fieldOptionsHtml(c.listSubtitleField,'text')}</select></div>`:''}
+    ${needsImage?`<div class="prop-group"><label>Image field</label><select data-list-prop="listImageField">${fieldOptions(c.listImageField,'image')}</select></div>`:''}
+    ${needsTitle?`<div class="prop-group"><label>Title field</label><select data-list-prop="listTitleField">${fieldOptions(c.listTitleField,'text')}</select></div>`:''}
+    ${needsSubtitle?`<div class="prop-group"><label>Subtitle field</label><select data-list-prop="listSubtitleField">${fieldOptions(c.listSubtitleField,'text')}</select></div>`:''}
     <div class="prop-group"><label>List background</label><select data-list-prop="listBackground"><option value="white" ${(c.listBackground||(!c.listTransparent?'white':'transparent'))==='white'?'selected':''}>White</option><option value="transparent" ${(c.listBackground||(!c.listTransparent?'white':'transparent'))==='transparent'?'selected':''}>Transparent</option></select><small class="prop-help">Transparent lets the page background show through the list and every row.</small></div>
-    ${autoBlocksEnabled()?`<div class="prop-group"><label>When a row is tapped</label><select data-list-prop="navigateToPage">${pageOptionsHtml(c.navigateToPage,c.pageId)}</select></div><div class="connection-note">${c.navigateToPage?`Tap → <b>${escapeHtml(pageName(c.navigateToPage))}</b>. Auto support will add the Blockly navigation.`:'Choose a destination page and Auto support will create the list-tap blocks.'}</div>`:`<button class="btn connect" style="width:100%;margin-top:8px" data-program-component="${escapeAttr(c.id)}" data-program-kind="list">🧩 Program what happens when a row is tapped</button><div class="connection-note">The tapped row automatically becomes the <b>selected record</b>, but you must add the Blockly event and navigation yourself.</div>`}
+    ${autoBlocksEnabled()?`<div class="prop-group"><label>When a row is tapped</label><select data-list-prop="navigateToPage">${pageOptionsHtml(c.navigateToPage,c.pageId)}</select></div><div class="connection-note">${c.navigateToPage?`Tap → <b>${escapeHtml(pageName(c.navigateToPage))}</b>. ${source==='api'?'The tapped API result becomes the current live result.':'The tapped database row becomes the selected record.'}`:'Choose a destination page and Auto support will create the list-tap blocks.'}</div>`:`<button class="btn connect" style="width:100%;margin-top:8px" data-program-component="${escapeAttr(c.id)}" data-program-kind="list">🧩 Program what happens when a row is tapped</button><div class="connection-note">${source==='api'?'The tapped API row automatically becomes the current live result.':'The tapped row automatically becomes the selected record.'} You add the navigation event in Blocks.</div>`}
   </div>`;
 }
+
 function phoneMarkup(mode='design'){
   const pageId=state.currentPageId||state.project.pages[0]?.id;
   const pg=state.project.pages.find(p=>p.id===pageId);return `<div class="phone device-${state.device}"><div class="screen" style="background:${escapeAttr(pg?.backgroundColor||'#ffffff')}" data-phone-mode="${mode}" data-page-id="${escapeAttr(pageId)}">${componentsOnPage(pageId).map(c=>componentMarkup(c,mode)).join('')}</div></div>`;
 }
 function listRowsMarkup(c,mode){
-  const rows=mode==='test'?(state.testRecords||[]):(state.project.records||[]);
-  if(!rows.length)return `<div class="list-empty">No database records yet</div>`;
+  const apiSource=projectCapabilityLevel()>=5&&c.listDataSource==='api';
+  const rows=apiSource?(mode==='test'?(state.testApiRows||[]):(state.apiPreviewRows||[])):(mode==='test'?(state.testRecords||[]):(state.project.records||[]));
+  if(!rows.length)return `<div class="list-empty">${apiSource?'Test your API in Connect, or run a search in Test, to fill this List.':'No database records yet'}</div>`;
   return rows.map((r,i)=>{
     const image=c.listImageField?resolveImage(r[c.listImageField]):'';
-    const title=c.listTitleField?formatFieldValue(c.listTitleField,r[c.listTitleField]):'';
-    const subtitle=c.listSubtitleField?formatFieldValue(c.listSubtitleField,r[c.listSubtitleField]):'';
+    const title=c.listTitleField?(apiSource?String(r[c.listTitleField]??''):formatFieldValue(c.listTitleField,r[c.listTitleField])):'';
+    const subtitle=c.listSubtitleField?(apiSource?String(r[c.listSubtitleField]??''):formatFieldValue(c.listSubtitleField,r[c.listSubtitleField])):'';
     const rowClass=`data-list-row layout-${c.listLayout||'image-title-subtitle'}`;
     return `<div class="${rowClass}" ${mode==='test'?`data-list-index="${i}"`:''}>
       ${c.listLayout?.includes('image')?`<div class="list-row-image">${image?`<img src="${escapeAttr(image)}" alt="">`:'<span>🖼️</span>'}</div>`:''}
-      ${c.listLayout!=='image-only'?`<div class="list-row-copy">${c.listLayout?.includes('title')?`<strong>${escapeHtml(title||`Record ${i+1}`)}</strong>`:''}${c.listLayout?.includes('subtitle')?`<span>${escapeHtml(subtitle)}</span>`:''}</div>`:''}
+      ${c.listLayout!=='image-only'?`<div class="list-row-copy">${c.listLayout?.includes('title')?`<strong>${escapeHtml(title||`${apiSource?'Result':'Record'} ${i+1}`)}</strong>`:''}${c.listLayout?.includes('subtitle')?`<span>${escapeHtml(subtitle)}</span>`:''}</div>`:''}
       ${c.navigateToPage?'<div class="list-row-arrow">›</div>':''}
     </div>`;
   }).join('');
 }
+
 function runtimeComponentValue(c,mode){
   if(mode==='test'&&Object.prototype.hasOwnProperty.call(state.testValues,c.id))return state.testValues[c.id];
   return c.defaultValue??'';
@@ -768,11 +818,15 @@ function componentMarkup(c,mode){
   const style=`left:${c.x}px;top:${c.y}px;width:${c.w}px;height:${c.h}px;${hidden?'display:none;':''}`;
   const attrs=mode==='design'?`data-component="${c.id}"`:`data-test-component="${c.id}"`;
   const textColor=escapeAttr(c.textColor||'#172033'),bg=escapeAttr(c.backgroundColor||'transparent');
+  const directApi=c.contentSource==='api'&&c.apiField;
+  const apiResult=mode==='test'?state.testApiResult:state.apiPreview;
+  const apiRaw=directApi?apiResult?.[c.apiField]:undefined;
+  const apiValue=directApi?(apiRaw!==undefined&&apiRaw!==null&&apiRaw!==''?apiRaw:(c.type==='image'?(c.src||''):(mode==='design'?`API: ${apiFieldLabel(c.apiField)}`:''))):'';
   let inner='';
-  if(c.type==='label'){const value=mode==='test'&&Object.prototype.hasOwnProperty.call(state.testDisplayValues,c.id)?state.testDisplayValues[c.id]:(c.text||'Label');inner=`<div class="label" style="font-size:${c.fontSize||16}px;text-align:${c.align||'left'};color:${textColor};background:${bg}">${escapeHtml(value)}</div>`;}
+  if(c.type==='label'){const value=directApi?apiValue:(mode==='test'&&Object.prototype.hasOwnProperty.call(state.testDisplayValues,c.id)?state.testDisplayValues[c.id]:(c.text||'Label'));inner=`<div class="label" style="font-size:${c.fontSize||16}px;text-align:${c.align||'left'};color:${textColor};background:${bg}">${escapeHtml(value)}</div>`;}
   if(c.type==='button'){const value=mode==='test'&&Object.prototype.hasOwnProperty.call(state.testDisplayValues,c.id)?state.testDisplayValues[c.id]:(c.text||'Button');inner=`<button style="background:${escapeAttr(c.backgroundColor||'#5b5ce2')};color:${escapeAttr(c.textColor||'#ffffff')}">${escapeHtml(value)}</button>`;}
-  if(c.type==='image'){const value=mode==='test'&&Object.prototype.hasOwnProperty.call(state.testDisplayValues,c.id)?state.testDisplayValues[c.id]:c.src;inner=`<img src="${escapeAttr(resolveImage(value))}" alt="">`;}
-  if(c.type==='input'){const value=mode==='test'&&Object.prototype.hasOwnProperty.call(state.testDisplayValues,c.id)?state.testDisplayValues[c.id]:(c.text||'Long text appears here');inner=`<div class="text-box-component" style="background:${escapeAttr(c.backgroundColor||'#ffffff')};color:${textColor}">${escapeHtml(value)}</div>`;}
+  if(c.type==='image'){const value=directApi?apiValue:(mode==='test'&&Object.prototype.hasOwnProperty.call(state.testDisplayValues,c.id)?state.testDisplayValues[c.id]:c.src);inner=`<img src="${escapeAttr(resolveImage(value||imageSvg('🌐','API image')))}" alt="">`;}
+  if(c.type==='input'){const value=directApi?apiValue:(mode==='test'&&Object.prototype.hasOwnProperty.call(state.testDisplayValues,c.id)?state.testDisplayValues[c.id]:(c.text||'Long text appears here'));inner=`<div class="text-box-component" style="background:${escapeAttr(c.backgroundColor||'#ffffff')};color:${textColor}">${escapeHtml(value)}</div>`;}
   if(c.type==='textInput') inner=`<input class="interactive-input" data-interactive-value type="text" placeholder="${escapeAttr(c.placeholder||'Type here...')}" value="${escapeAttr(runtimeComponentValue(c,mode))}" style="background:${bg};color:${textColor}" ${mode==='design'?'readonly':''}>`;
   if(c.type==='numberInput') inner=`<input class="interactive-input" data-interactive-value type="number" placeholder="${escapeAttr(c.placeholder||'Enter a number')}" value="${escapeAttr(runtimeComponentValue(c,mode))}" style="background:${bg};color:${textColor}" ${mode==='design'?'readonly':''}>`;
   if(c.type==='dropdown'){const value=String(runtimeComponentValue(c,mode)??''),opts=dropdownOptions(c);inner=`<select class="interactive-input" data-interactive-value style="background:${bg};color:${textColor}" ${mode==='design'?'disabled':''}>${opts.map((o,i)=>`<option value="${escapeAttr(o)}" ${(value===o||(!value&&i===0))?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select>`;}
@@ -791,10 +845,11 @@ function blockTutorialCard(){
     let title='Use your new interactive tools',body=`Level ${capLevel} keeps all the earlier blocks and only adds the tools needed for this project.`;
     if(kind==='interactive'||kind==='overview'){title=`Program ${name}`;body=`<ol><li>Use <b>Events → when … changes</b> if something should happen as the user changes an input, or use a Button click event.</li><li>Use <b>Logic → if … then / else</b> to make a decision from an input value.</li><li>Use Screen blocks to show a message, show/hide something, or copy an input value into a label/text box.</li><li>Run the app and test both outcomes.</li></ol>`;}
     if(kind==='button'){title=`Program ${name}`;body=`<ol><li>Drag <b>when ${name} clicked</b> from Events.</li><li>${capLevel>=3?'To save a form, use one of the new Database record blocks.':'Put your IF / ELSE or Screen response blocks inside the event.'}</li><li>Snap the blocks together and test the button.</li></ol>`;}
+    if(kind==='list'){const apiList=c?.type==='list'&&c.listDataSource==='api';title='Program the List tap';body=`<ol><li>Open <b>Events</b> and drag <b>when an item in … is tapped</b>.</li><li>Choose <b>${name}</b>.</li><li>${apiList?'The tapped row automatically becomes the <b>current live API result</b>.':'The tapped row automatically becomes the <b>selected database record</b>.'}</li><li>Use <b>Navigation → go to</b> if you want to open a Details page.</li></ol>`;}
     if(kind==='datawrite'){title='Change database records';body=`<ol><li>In Design, map each form input to its <b>Database field to save</b>.</li><li>Put <b>add new record from form inputs</b> inside a button click to create a row.</li><li>Use <b>update selected record</b> or <b>delete selected record</b> when your app needs them.</li><li>Test mode uses a copy, so your saved project data is safe.</li></ol>`;}
     if(kind==='variables'){title='Remember a value with Variables';body=`<ol><li>Use <b>set variable</b> to give a value a starting point.</li><li>Use <b>change variable by</b> for scores and counters.</li><li>Use <b>set … to variable</b> to display the current value.</li></ol>`;}
-    if(kind==='api'){const api=apiServiceInfo(state.project.apiService);title=`Connect ${api.name}`;body=`<ol><li>Put <b>🌐 ask ${api.name} using …</b> inside your Search button event.</li><li>Choose the Text Input that contains the user's search.</li><li>Add <b>set … to API result …</b> blocks for the values you want to display.</li><li>Use <b>if last API request worked</b> to give a useful failure message.</li><li>Test a real search and an invalid one.</li></ol>`;}
-    return `<div class="block-tutorial-card"><div class="block-tutorial-head"><div><span class="tag capability-tag">${escapeHtml(capabilityLabel(capLevel))}</span><h3>${title}</h3></div></div><div class="block-help-tabs"><button class="btn small ${kind==='interactive'||kind==='overview'?'primary':''}" data-block-help="interactive">Inputs + IF</button><button class="btn small ${kind==='button'?'primary':''}" data-block-help="button">Button</button>${capLevel>=3?`<button class="btn small ${kind==='datawrite'?'primary':''}" data-block-help="datawrite">Change data</button>`:''}${capLevel>=4?`<button class="btn small ${kind==='variables'?'primary':''}" data-block-help="variables">Variables</button>`:''}${capLevel>=5?`<button class="btn small ${kind==='api'?'primary':''}" data-block-help="api">Web / API</button>`:''}</div><div class="block-tutorial-body">${body}</div></div>`;
+    if(kind==='api'){const api=apiServiceInfo(state.project.apiService);title=`Connect ${api.name}`;body=`<ol><li>In Design, connect Labels, Images or a List to the API fields you want to show.</li><li>Put <b>🌐 ask ${api.name} using …</b> inside your Search button event.</li><li>Choose the Text Input that contains the user's search.</li><li>The connected components update automatically when the request succeeds.</li><li>Use <b>if last API request worked</b> to give a useful failure message.</li><li>Test a real search and an invalid one.</li></ol>`;}
+    return `<div class="block-tutorial-card"><div class="block-tutorial-head"><div><span class="tag capability-tag">${escapeHtml(capabilityLabel(capLevel))}</span><h3>${title}</h3></div></div><div class="block-help-tabs"><button class="btn small ${kind==='interactive'||kind==='overview'?'primary':''}" data-block-help="interactive">Inputs + IF</button><button class="btn small ${kind==='button'?'primary':''}" data-block-help="button">Button</button><button class="btn small ${kind==='list'?'primary':''}" data-block-help="list">List tap</button>${capLevel>=3?`<button class="btn small ${kind==='datawrite'?'primary':''}" data-block-help="datawrite">Change data</button>`:''}${capLevel>=4?`<button class="btn small ${kind==='variables'?'primary':''}" data-block-help="variables">Variables</button>`:''}${capLevel>=5?`<button class="btn small ${kind==='api'?'primary':''}" data-block-help="api">Web / API</button>`:''}</div><div class="block-tutorial-body">${body}</div></div>`;
   }
   const kind1=kind;let title='Build the blocks yourself',body=`Choose the kind of help you need. Nothing is inserted into the workspace unless your teacher has turned on Auto-add support for you.`;
   if(kind1==='button') {title=`Program ${name}`;body=`<ol><li>Open <b>Events</b> and drag <b>when … clicked</b> onto the workspace.</li><li>Choose <b>${name}</b>.</li><li>Use <b>Navigation → go to</b> or <b>go back</b>.</li><li>Snap the action inside the event.</li><li>Run the app and test it.</li></ol>`;}
@@ -807,30 +862,30 @@ function apiPreviewMarkup(){
   if(state.apiPreviewError)return `<div class="notice warning"><b>Request failed:</b> ${escapeHtml(state.apiPreviewError)}</div>`;
   const result=state.apiPreview;
   if(!result)return `<div class="api-preview-empty">Try a request to see friendly data and the JSON response here.</div>`;
-  const service=apiServiceInfo(state.project.apiService);
-  return `<div class="api-friendly-result">${service.fields.map(([key,label])=>{const value=result[key]??'';return `<div><span>${escapeHtml(label)}</span>${/Url$/.test(key)&&/^https?:/i.test(String(value))?`<img src="${escapeAttr(value)}" alt="${escapeAttr(label)}">`:`<b>${escapeHtml(String(value))}</b>`}</div>`}).join('')}</div><details class="json-view"><summary>See the JSON your app received</summary><pre>${escapeHtml(JSON.stringify(result,null,2))}</pre></details>`;
+  const service=apiServiceInfo(state.project.apiService),rowCount=(state.apiPreviewRows||[]).length;
+  return `${rowCount>1?`<div class="notice api-result-count"><b>${rowCount} results found.</b> A List component can display these rows automatically.</div>`:''}<div class="api-friendly-result">${service.fields.map(([key,label,kind])=>{const value=result[key]??'';return `<div><span>${escapeHtml(label)}</span>${kind==='image'&&/^https?:/i.test(String(value))?`<img src="${escapeAttr(value)}" alt="${escapeAttr(label)}">`:`<b>${escapeHtml(String(value))}</b>`}</div>`}).join('')}</div><details class="json-view"><summary>See the JSON your app received</summary><pre>${escapeHtml(JSON.stringify(rowCount>1?state.apiPreviewRows:result,null,2))}</pre></details>`;
 }
 function apiView(){
   if(projectCapabilityLevel()<5)return `<div class="notice warning">The Connect/API workspace unlocks at Level 5.</div>`;
   const current=apiServiceInfo(state.project.apiService),inspect=state.teacherInspectActive&&state.role==='teacher';
   return `<div class="notice"><b>Start here — no database needed.</b> First choose the live information service your app will use, then test a search. After that you will design the screen and program the request.</div>
-  <div class="section-head"><div><h2>1. Choose your API</h2><p>Pick one safe classroom API and test a real request. The result fields you see here become available in Blockly later.</p></div><span class="tag capability-tag">Level 5 — Connected App</span></div>
+  <div class="section-head"><div><h2>1. Choose your API</h2><p>Pick one safe classroom API and test a real request. Then use these same fields directly in Labels, Images and Lists in Design.</p></div><span class="tag capability-tag">Level 5 — Connected App</span></div>
   <div class="api-flow"><span>📱 Your app</span><b>→ request →</b><span>🌐 API</span><b>→ JSON →</b><span>✨ Your screen</span></div>
   <div class="api-library">${Object.values(API_CATALOG).map(api=>`<button class="api-card ${api.id===current.id?'active':''}" data-api-service="${escapeAttr(api.id)}" ${inspect?'disabled':''}><span class="api-emoji">${api.emoji}</span><b>${escapeHtml(api.name)}</b><small>${escapeHtml(api.provider)}</small><p>${escapeHtml(api.description)}</p></button>`).join('')}</div>
-  <div class="api-workbench"><section class="card"><div class="project-meta"><span class="tag">Selected API</span><span class="tag tag-good">No pupil API key</span></div><h3>${current.emoji} ${escapeHtml(current.name)}</h3><p class="muted">${escapeHtml(current.description)}</p><label>${escapeHtml(current.queryLabel)}</label><div class="api-test-row"><input id="apiTestQuery" value="${escapeAttr(state.apiTestQuery||'')}" placeholder="${escapeAttr(current.placeholder)}"><button class="btn primary" data-action="test-api" ${inspect?'':' '}>▶ Test request</button></div><h4>Result fields available in Blockly</h4><div class="api-field-chips">${current.fields.map(([key,label])=>`<span title="JSON field: ${escapeAttr(key)}">${escapeHtml(label)} <code>${escapeHtml(key)}</code></span>`).join('')}</div><div class="notice"><b>Classroom safety:</b> these connectors use curated public endpoints and do not ask pupils to paste secret API keys into their apps.</div></section><section class="card api-preview"><h3>API response</h3>${apiPreviewMarkup()}</section></div>
+  <div class="api-workbench"><section class="card"><div class="project-meta"><span class="tag">Selected API</span><span class="tag tag-good">No pupil API key</span></div><h3>${current.emoji} ${escapeHtml(current.name)}</h3><p class="muted">${escapeHtml(current.description)}</p><label>${escapeHtml(current.queryLabel)}</label><div class="api-test-row"><input id="apiTestQuery" value="${escapeAttr(state.apiTestQuery||'')}" placeholder="${escapeAttr(current.placeholder)}"><button class="btn primary" data-action="test-api" ${inspect?'':' '}>▶ Test request</button></div><h4>These are the fields you can use in your design</h4><div class="api-field-chips">${current.fields.map(([key,label])=>`<span title="JSON field: ${escapeAttr(key)}">${escapeHtml(label)} <code>${escapeHtml(key)}</code></span>`).join('')}</div><div class="notice"><b>How to use it:</b> ${escapeHtml(current.resultHint||'Choose fields in Design after testing the API.')}<br><br><b>Classroom safety:</b> these connectors use curated public endpoints and do not ask pupils to paste secret API keys into their apps.</div></section><section class="card api-preview"><h3>API response</h3>${apiPreviewMarkup()}</section></div>
   <details class="card"><summary><b>Advanced: add local database data (optional)</b></summary><p class="muted">Most Level 5 Live Info Finder apps do not need any database fields or records. Open this only if you want to combine live API information with your own local data.</p><button class="btn small" data-tab="data">Open optional Data workspace →</button></details>`;
 }
 function bindApi(){
-  $$('[data-api-service]').forEach(btn=>btn.onclick=()=>{const next=btn.dataset.apiService;if(!API_CATALOG[next]||next===state.project.apiService)return;state.project.apiService=next;const valid=new Set(apiServiceInfo(next).fields.map(([key])=>key)),fallback=apiServiceInfo(next).fields[0]?.[0]||'';const fix=items=>(items||[]).forEach(item=>{if(item.type==='set_from_api'&&!valid.has(item.field))item.field=fallback;fix(item.then);fix(item.else)});fix(state.project.program);state.project.blocklyPages={};state.apiPreview=null;state.apiPreviewError='';state.apiTestQuery='';saveProject();render();});
+  $$('[data-api-service]').forEach(btn=>btn.onclick=()=>{const next=btn.dataset.apiService;if(!API_CATALOG[next]||next===state.project.apiService)return;state.project.apiService=next;const valid=new Set(apiServiceInfo(next).fields.map(([key])=>key)),fallback=apiServiceInfo(next).fields[0]?.[0]||'';const imageFallback=apiServiceInfo(next).fields.find(([, ,kind])=>kind==='image')?.[0]||'';const textFallback=apiServiceInfo(next).fields.find(([, ,kind])=>kind!=='image')?.[0]||fallback;const fix=items=>(items||[]).forEach(item=>{if(item.type==='set_from_api'&&!valid.has(item.field))item.field=fallback;fix(item.then);fix(item.else)});fix(state.project.program);for(const c of state.project.components||[]){if(c.contentSource==='api'&&!valid.has(c.apiField))c.apiField=c.type==='image'?imageFallback:textFallback;if(c.type==='list'&&c.listDataSource==='api')applyApiListDefaults(c);}state.project.blocklyPages={};state.apiPreview=null;state.apiPreviewRows=[];state.apiPreviewError='';state.apiTestQuery='';saveProject();render();});
   const input=$('#apiTestQuery');if(input)input.oninput=e=>state.apiTestQuery=e.target.value;
-  const test=$('[data-action="test-api"]');if(test)test.onclick=async()=>{state.apiTestQuery=$('#apiTestQuery')?.value||'';state.apiPreviewLoading=true;state.apiPreview=null;state.apiPreviewError='';render();try{state.apiPreview=await fetchApiData(state.project.apiService,state.apiTestQuery);state.project.apiTested=true;saveProject()}catch(err){state.apiPreviewError=err.message||'The API request failed.'}finally{state.apiPreviewLoading=false;render()}};
+  const test=$('[data-action="test-api"]');if(test)test.onclick=async()=>{state.apiTestQuery=$('#apiTestQuery')?.value||'';state.apiPreviewLoading=true;state.apiPreview=null;state.apiPreviewRows=[];state.apiPreviewError='';render();try{const response=await fetchApiResponse(state.project.apiService,state.apiTestQuery);state.apiPreview=response.primary;state.apiPreviewRows=response.rows||[];state.project.apiTested=true;saveProject()}catch(err){state.apiPreviewError=err.message||'The API request failed.'}finally{state.apiPreviewLoading=false;render()}};
 }
 
 function blocksView(){const pg=currentPage();return `<div class="section-head"><div><h2>Make ${escapeHtml(pg?.name||'this page')} work</h2><p>Each page has its own Blockly workspace. This project only shows the programming tools unlocked for its capability level.</p></div><button class="btn good" data-tab="test">▶ Run app</button></div>
 <div class="capability-banner"><div><b>${escapeHtml(capabilityLabel(projectCapabilityLevel()))}</b><span>${escapeHtml(capabilityInfo(projectCapabilityLevel()).description)}</span></div><span class="tag">Blockly toolbox filtered</span></div>
 <div class="page-strip blocks-page-strip"><div class="page-tabs">${state.project.pages.map((p,i)=>`<button class="page-tab ${p.id===state.currentPageId?'active':''}" data-block-page="${p.id}"><span>${escapeHtml(p.name)}</span><small>Page ${i+1} blocks</small></button>`).join('')}</div><div class="page-actions"><span class="tag">Editing: ${escapeHtml(pg?.name||'Page')}</span></div></div>
 ${blockTutorialCard()}
-<div class="blockly-layout"><section class="blockly-card"><div class="blockly-help"><b>Remember:</b> <span>A list tap chooses the selected database record. Screen blocks display fields from it, and Navigation blocks move between pages.</span></div><div id="blocklyDiv" class="blockly-workspace"></div></section>
+<div class="blockly-layout"><section class="blockly-card"><div class="blockly-help"><b>Remember:</b> <span>${projectCapabilityLevel()>=5?'Design can connect components directly to API fields. Blocks control when the API request happens and what to do on success or failure.':'A list tap chooses the selected database record. Screen blocks display fields from it, and Navigation blocks move between pages.'}</span></div><div id="blocklyDiv" class="blockly-workspace"></div></section>
 <aside class="code-panel blockly-code"><div style="display:flex;justify-content:space-between;align-items:center"><h3>Show code</h3><span class="tag">Live</span></div><div class="code-toggle"><button data-code-mode="python" class="${state.codeMode==='python'?'active':''}">Python idea</button><button data-code-mode="plain" class="${state.codeMode==='plain'?'active':''}">Plain English</button></div><div class="codebox" id="generatedCode">${escapeHtml(generateCode())}</div><div class="mini-checks">${checklistBadges()}</div><div class="notice" style="margin-top:12px">${autoBlocksEnabled()?'Your teacher has enabled <b>Auto-add block support</b>. Design shortcuts may create starter blocks for you. You can still change them yourself.':'Design shortcuts will <b>not</b> create Blockly for you. Use the tutorial above and build the blocks yourself.'}</div></aside></div>`}
 
 function programMarkup(){
@@ -960,6 +1015,7 @@ function bindCommon(){
   $$('[data-action="create-class"]').forEach(b=>b.onclick=showCreateClassModal);
   $$('[data-action="join-class"]').forEach(b=>b.onclick=showJoinClassModal);
   const newAssignment=$('[data-action="new-assignment"]'); if(newAssignment)newAssignment.onclick=showAssignmentModal;
+  $$('[data-manage-assignment]').forEach(b=>b.onclick=()=>showAssignmentAudienceModal(b.dataset.manageAssignment));
   const manageBank=$('[data-action="manage-bank"]'); if(manageBank)manageBank.onclick=showBankManager;
   const inviteTeacher=$('[data-action="invite-teacher"]'); if(inviteTeacher)inviteTeacher.onclick=showInviteTeacherModal;
   $$('[data-cancel-teacher-invite]').forEach(b=>b.onclick=async()=>{
@@ -1226,9 +1282,11 @@ function bindDesign(){
       fontSize:18,align:'center',textColor:type==='button'?'#ffffff':'#172033',
       backgroundColor:type==='button'?'#5b5ce2':['input','textInput','numberInput','dropdown','switch','slider'].includes(type)?'#ffffff':'',
       src:type==='image'?imageSvg('🖼️','Your image'):'',
-      listLayout:'image-title-subtitle',listImageField:'',listTitleField:'',listSubtitleField:'',listBackground:'white',listTransparent:false,navigateToPage:'',
+      listLayout:'image-title-subtitle',listDataSource:'database',listImageField:'',listTitleField:'',listSubtitleField:'',listBackground:'white',listTransparent:false,navigateToPage:'',
+      contentSource:'fixed',apiField:'',
       placeholder:type==='numberInput'?'Enter a number':'Type here...',defaultValue:type==='switch'?false:type==='slider'?50:'',dataField:'',
       options:type==='dropdown'?'Option 1\nOption 2\nOption 3':'',min:0,max:100,step:1,visible:true};
+    if(type==='list'&&projectCapabilityLevel()>=5)applyApiListDefaults(c);
     state.project.components.push(c);state.selectedComponent=c.id;saveProject();render()
   });
   $$('.screen-component[data-component]').forEach(el=>{
@@ -1264,6 +1322,7 @@ function bindDesign(){
   $$('[data-list-prop]').forEach(inp=>inp.onchange=()=>{
     const c=state.project.components.find(x=>x.id===state.selectedComponent);if(!c||c.type!=='list')return;
     c[inp.dataset.listProp]=inp.value;
+    if(inp.dataset.listProp==='listDataSource'){if(inp.value==='api')applyApiListDefaults(c);else{c.listImageField='';c.listTitleField='';c.listSubtitleField='';}}
     if(inp.dataset.listProp==='listBackground')c.listTransparent=inp.value==='transparent';
     if(inp.dataset.listProp==='navigateToPage')connectListNavigation(c);
     saveProject();render();
@@ -1276,6 +1335,7 @@ function bindDesign(){
     const c=state.project.components.find(x=>x.id===state.selectedComponent);if(!c)return;
     c[inp.dataset.componentToggle]=Boolean(inp.checked);saveProject();render();
   });
+  $$('[data-api-bind]').forEach(inp=>inp.onchange=()=>{const c=state.project.components.find(x=>x.id===state.selectedComponent);if(!c)return;const prop=inp.dataset.apiBind;c[prop]=inp.value;if(prop==='contentSource'&&inp.value==='fixed')c.apiField='';if(prop==='contentSource'&&inp.value==='api'&&!c.apiField)c.apiField=apiFieldsForType(c.type==='image'?'image':'text')[0]?.[0]||'';saveProject();render();});
   $$('[data-device]').forEach(btn=>btn.onclick=()=>{state.device=btn.dataset.device;render()});
   $$('[data-program-component]').forEach(btn=>btn.onclick=()=>{
     state.selectedComponent=btn.dataset.programComponent||state.selectedComponent;
@@ -1389,6 +1449,8 @@ function showAssignmentModal(){
     ${[1,2,3,4,5].map(n=>`<div class="capability-step ${n===1?'active':''}" data-cap-preview="${n}"><b>Level ${n}</b><span>${escapeHtml(capabilityInfo(n).name)}</span></div>`).join('')}
   </div>
   <div id="recommendedBrief" class="recommended-brief"></div>
+  <div class="field assignment-audience"><label>Who gets this assignment?</label><select id="assignmentTarget"><option value="all" selected>Whole class</option><option value="selected">Selected pupils only</option></select><small class="prop-help">You can add more pupils to the same assignment later as they become ready.</small></div>
+  <div id="assignmentPupilPicker" class="assignment-pupil-picker" hidden></div>
   <div class="field"><label>Extra instructions for this class (optional)</label><textarea id="assignmentInstructions" rows="3" placeholder="e.g. Use a Scottish location, or work with your partner's test data."></textarea></div>
   <div class="field"><label>Pupil support</label><select id="assignmentTutorial"><option value="guided" selected>Guided tutorial — step by step</option><option value="checklist">Checklist only — more independent</option></select></div>
   <div class="field"><label>Support level label</label><select id="assignmentLevel"><option>Starter</option><option selected>Guided</option><option>Independent</option></select></div>
@@ -1396,16 +1458,31 @@ function showAssignmentModal(){
   <div class="modal-actions"><button class="btn" id="cancelAssignment">Cancel</button><button class="btn primary" id="createAssignment">Create</button></div></div>`;
   document.body.appendChild(wrap);
   $('#cancelAssignment').onclick=()=>wrap.remove();
+  const renderPupilPicker=()=>{const host=$('#assignmentPupilPicker');if(!host)return;host.innerHTML=state.members.length?`<div class="pupil-picker-head"><b>Select pupils</b><button type="button" class="btn small" id="selectAllAssignmentPupils">Select all</button></div><div class="pupil-check-grid">${state.members.map(m=>`<label class="pupil-check"><input type="checkbox" data-assignment-pupil value="${escapeAttr(m.uid||m.id)}"><span><b>${escapeHtml(m.displayName||'Pupil')}</b><small>${escapeHtml(m.email||'')}</small></span></label>`).join('')}</div>`:'<div class="empty-note">No pupils have joined this class yet.</div>';const all=$('#selectAllAssignmentPupils');if(all)all.onclick=()=>$$('[data-assignment-pupil]',host).forEach(x=>x.checked=true);};renderPupilPicker();$('#assignmentTarget').onchange=e=>{$('#assignmentPupilPicker').hidden=e.target.value!=='selected';};
   let previousBriefTitle=projectBrief(1).title;const showBrief=n=>{const b=projectBrief(n),host=$('#recommendedBrief');if(host)host.innerHTML=`<span>${b.emoji}</span><div><b>Recommended project: ${escapeHtml(b.title)}</b><p>${escapeHtml(b.mission)}</p></div>`;const title=$('#assignmentTitle');if(title&&(!title.value.trim()||title.value.trim()===previousBriefTitle||title.value.trim()==='My Database App'))title.value=b.title;previousBriefTitle=b.title;};showBrief(1);$('#assignmentCapability').onchange=e=>{const n=Number(e.target.value)||1;$('#capabilityHelp').textContent=capabilityInfo(n).description;$$('[data-cap-preview]',wrap).forEach(x=>x.classList.toggle('active',Number(x.dataset.capPreview)<=n));const rec=$('#assignmentRecords');if(rec)rec.value=({1:3,2:0,3:2,4:0,5:0})[n]??0;showBrief(n);};
   $('#createAssignment').onclick=async()=>{
     const title=$('#assignmentTitle').value.trim()||'New assignment';
-    const assignment={id:CLOUD_MODE?'':`a-${Date.now()}`,title,template:'blank',tutorialMode:$('#assignmentTutorial').value,level:$('#assignmentLevel').value,capabilityLevel:Number($('#assignmentCapability').value)||1,teacherInstructions:($('#assignmentInstructions')?.value||'').trim(),requirements:{records:Math.max(0,Number($('#assignmentRecords').value)||0),components:4,blocks:4}};
+    const targetMode=$('#assignmentTarget').value==='selected'?'selected':'all';
+    const pupilUids=targetMode==='selected'?$$('[data-assignment-pupil]',wrap).filter(x=>x.checked).map(x=>x.value):[];
+    if(targetMode==='selected'&&!pupilUids.length){alert('Choose at least one pupil, or change the assignment to Whole class.');return;}
+    const assignment={id:CLOUD_MODE?'':`a-${Date.now()}`,title,template:'blank',tutorialMode:$('#assignmentTutorial').value,level:$('#assignmentLevel').value,capabilityLevel:Number($('#assignmentCapability').value)||1,teacherInstructions:($('#assignmentInstructions')?.value||'').trim(),targetMode,pupilUids,requirements:{records:Math.max(0,Number($('#assignmentRecords').value)||0),components:4,blocks:4}};
     try{
       if(CLOUD_MODE){if(!state.currentClassId)throw new Error('Choose a class first.');assignment.id=await cloudSaveAssignment(state.currentClassId,assignment)}
       state.assignments.push(assignment); if(!CLOUD_MODE)saveAssignments(); wrap.remove(); render();
     }catch(err){alert(err.message)}
   };
 }
+function showAssignmentAudienceModal(id){
+  const assignment=state.assignments.find(a=>a.id===id);if(!assignment)return;
+  normaliseAssignment(assignment);
+  const wrap=document.createElement('div');wrap.className='modal-backdrop';
+  wrap.innerHTML=`<div class="modal assignment-manage-modal"><h3>Manage pupils — ${escapeHtml(assignment.title)}</h3><p class="muted">Keep this as one assignment and add pupils whenever they are ready.</p><div class="field"><label>Who gets this assignment?</label><select id="manageAssignmentTarget"><option value="all" ${assignment.targetMode==='all'?'selected':''}>Whole class</option><option value="selected" ${assignment.targetMode==='selected'?'selected':''}>Selected pupils only</option></select></div><div id="manageAssignmentPupils" class="assignment-pupil-picker" ${assignment.targetMode==='all'?'hidden':''}>${state.members.length?`<div class="pupil-check-grid">${state.members.map(m=>{const uid=m.uid||m.id;return `<label class="pupil-check"><input type="checkbox" data-manage-pupil value="${escapeAttr(uid)}" ${assignment.pupilUids.includes(uid)?'checked':''}><span><b>${escapeHtml(m.displayName||'Pupil')}</b><small>${escapeHtml(m.email||'')}</small></span></label>`}).join('')}</div>`:'<div class="empty-note">No pupils have joined this class yet.</div>'}</div><div class="modal-actions"><button class="btn" id="cancelManageAssignment">Cancel</button><button class="btn primary" id="saveManageAssignment">Save pupils</button></div></div>`;
+  document.body.appendChild(wrap);
+  $('#cancelManageAssignment').onclick=()=>wrap.remove();
+  $('#manageAssignmentTarget').onchange=e=>{$('#manageAssignmentPupils').hidden=e.target.value!=='selected';};
+  $('#saveManageAssignment').onclick=async()=>{const targetMode=$('#manageAssignmentTarget').value==='selected'?'selected':'all';const pupilUids=targetMode==='selected'?$$('[data-manage-pupil]',wrap).filter(x=>x.checked).map(x=>x.value):[];if(targetMode==='selected'&&!pupilUids.length){alert('Choose at least one pupil, or use Whole class.');return;}assignment.targetMode=targetMode;assignment.pupilUids=pupilUids;try{if(CLOUD_MODE)await cloudSaveAssignment(state.currentClassId,assignment);else saveAssignments();wrap.remove();render()}catch(err){alert(friendlyFirebaseError(err))}};
+}
+
 function showConnectModal(){
   const c=state.project.components.find(x=>x.id===state.selectedComponent); if(!c)return;
   if(!autoBlocksEnabled()){state.blockTutorial='data';state.tab='blocks';render();return;}
@@ -1482,7 +1559,7 @@ function checklist(){
     {label:'Search input',ok:state.project.components.some(c=>c.type==='textInput')},
     {label:'Event',ok:hasEvent},
     {label:'API request',ok:programHasType(state.project.program,'api_request')},
-    {label:'Live result',ok:programHasType(state.project.program,'set_from_api')},
+    {label:'Live result',ok:programHasType(state.project.program,'set_from_api')||state.project.components.some(c=>(['label','input','image'].includes(c.type)&&c.contentSource==='api'&&c.apiField)||(c.type==='list'&&c.listDataSource==='api'&&(c.listTitleField||c.listImageField||c.listSubtitleField)))},
     {label:'Failure handled',ok:programHasType(state.project.program,'if_api_success')}
   ];
 }
@@ -1496,7 +1573,7 @@ function initialInteractiveValue(c){
 function startTest(withRender=true){
   state.currentRecord=0;state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.testLogs=[];state.tutorialTested=true;
   state.testRecords=clone(state.project.records||[]);
-  state.testValues={};state.testVisibility={};state.testVariables={};state.testDisplayValues={};state.testApiResult={};state.testApiSuccess=false;state.testApiError='';
+  state.testValues={};state.testVisibility={};state.testVariables={};state.testDisplayValues={};state.testApiResult={};state.testApiRows=[];state.testApiSuccess=false;state.testApiError='';
   for(const c of state.project.components||[]){state.testVisibility[c.id]=c.visible!==false;if(interactiveComponentType(c.type))state.testValues[c.id]=initialInteractiveValue(c);}
   log(`${pageName(state.currentPageId)} opened`,'good');const opening=runEvent('open',null,{pageId:state.currentPageId});if(withRender)render();opening.then(()=>{if(state.tab==='test')render()})
 }
@@ -1507,7 +1584,7 @@ function bindTest(){
   });
   $$('.screen-component[data-test-component] [data-list-index]').forEach(row=>row.onclick=async()=>{
     const host=row.closest('[data-test-component]'),id=host?.dataset.testComponent,index=Number(row.dataset.listIndex);if(!id||Number.isNaN(index))return;
-    state.currentRecord=index;log(`${nameOfComponent(id)} row ${index+1} tapped → selected record ${index+1}`,'good');
+    const component=state.project.components.find(c=>c.id===id);if(component?.listDataSource==='api'){state.testApiResult=state.testApiRows[index]||state.testApiResult;log(`${nameOfComponent(id)} row ${index+1} tapped → current API result`,'good');}else{state.currentRecord=index;log(`${nameOfComponent(id)} row ${index+1} tapped → selected record ${index+1}`,'good');}
     await runEvent('list_click',id,{pageId:state.currentPageId,index});render();
   });
   $$('.screen-component[data-test-component] [data-interactive-value]').forEach(control=>{
@@ -1570,7 +1647,7 @@ async function executeActions(actions=[]){
     if(b.type==='set_variable'){state.testVariables[b.name||'score']=parseLiteral(b.value);log(`${b.name||'score'} = ${String(state.testVariables[b.name||'score'])}`,'good');continue}
     if(b.type==='change_variable'){const name=b.name||'score';state.testVariables[name]=(Number(state.testVariables[name])||0)+(Number(b.amount)||0);log(`${name} = ${state.testVariables[name]}`,'good');continue}
     if(b.type==='set_from_variable'){applyRuntimeValueToTarget(b.target,state.testVariables[b.name||'score']??0);continue}
-    if(b.type==='api_request'){const q=state.testValues[b.source];log(`Sending request to ${apiServiceInfo(state.project.apiService).name}…`,'good');try{state.testApiResult=await fetchApiData(state.project.apiService,q);state.testApiSuccess=true;state.testApiError='';log('API replied with JSON data','good')}catch(err){state.testApiResult={};state.testApiSuccess=false;state.testApiError=err.message||'API request failed';log(`API request failed: ${state.testApiError}`,'warn')}continue}
+    if(b.type==='api_request'){const q=state.testValues[b.source];log(`Sending request to ${apiServiceInfo(state.project.apiService).name}…`,'good');try{const response=await fetchApiResponse(state.project.apiService,q);state.testApiResult=response.primary;state.testApiRows=response.rows||[];state.testApiSuccess=true;state.testApiError='';log(`API replied with ${state.testApiRows.length} result${state.testApiRows.length===1?'':'s'}`,'good')}catch(err){state.testApiResult={};state.testApiRows=[];state.testApiSuccess=false;state.testApiError=err.message||'API request failed';log(`API request failed: ${state.testApiError}`,'warn')}continue}
     if(b.type==='set_from_api'){applyRuntimeValueToTarget(b.target,state.testApiResult?.[b.field]??'');log(`${nameOfComponent(b.target)} ← API result ${b.field}`,'good');continue}
     if(b.type==='if_api_success'){await executeActions(state.testApiSuccess?(b.then||[]):(b.else||[]));continue}
     if(b.type==='add_record_form'){const row={};state.project.fields.forEach(f=>row[f.id]=defaultValueForType(f.type));applyFormInputs(row);fillAutomaticId(row,runtimeRows());runtimeRows().push(row);state.currentRecord=runtimeRows().length-1;log(`Added record ${runtimeRows().length}`,'good');continue}
@@ -1803,8 +1880,10 @@ async function loadSelectedClassData(doRender=true){
         localStorage.setItem('dataapp_project',JSON.stringify(state.project));
       }
     }
+    state.assignments=(state.assignments||[]).map(normaliseAssignment);
   }else{
     state.currentClass=state.classes.find(c=>c.id===state.currentClassId)||null;
+    state.assignments=(state.assignments||[]).map(normaliseAssignment);
   }
   if(doRender)render();
 }

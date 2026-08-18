@@ -1,5 +1,5 @@
 import { firebaseConfig } from './firebase-config.js';
-import { apiServiceInfo, fetchApiData } from './api-connectors.js';
+import { apiServiceInfo, fetchApiResponse } from './api-connectors.js';
 
 const root = document.getElementById('publishedRoot');
 const params = new URLSearchParams(location.search);
@@ -19,6 +19,7 @@ let runtimeValues = {};
 let runtimeVisibility = {};
 let runtimeVariables = {};
 let runtimeApiResult = {};
+let runtimeApiRows = [];
 let runtimeApiSuccess = false;
 let runtimeApiError = '';
 
@@ -79,8 +80,13 @@ function normaliseProject() {
       if (component.type === 'dropdown' && component.options === undefined) component.options = 'Option 1\nOption 2\nOption 3';
       if (component.type === 'slider') { if (component.min === undefined) component.min = 0; if (component.max === undefined) component.max = 100; if (component.step === undefined) component.step = 1; }
     }
+    if (['label','input','image'].includes(component.type)) {
+      component.contentSource = component.contentSource || (component.apiField ? 'api' : 'fixed');
+      component.apiField = component.apiField || '';
+    }
     if (component.type === 'list') {
       component.listLayout = component.listLayout || 'image-title-subtitle';
+      component.listDataSource = component.listDataSource || 'database';
       component.listImageField = component.listImageField || '';
       component.listTitleField = component.listTitleField || '';
       component.listSubtitleField = component.listSubtitleField || '';
@@ -199,7 +205,7 @@ function usePublishedData(data, {resetRuntime=true} = {}) {
     currentRecord = 0;
     pageHistory = [];
     runtimeRecords = loadRuntimeRecords() || cloneData(project.records || []);
-    runtimeValues = {}; runtimeVisibility = {}; runtimeVariables = {}; runtimeApiResult = {}; runtimeApiSuccess = false; runtimeApiError = '';
+    runtimeValues = {}; runtimeVisibility = {}; runtimeVariables = {}; runtimeApiResult = {}; runtimeApiRows = []; runtimeApiSuccess = false; runtimeApiError = '';
     for (const component of project.components || []) {
       runtimeVisibility[component.id] = component.visible !== false;
       if (interactiveComponentType(component.type)) runtimeValues[component.id] = initialInteractiveValue(component);
@@ -217,15 +223,16 @@ function formatValue(id, value) {
 }
 
 function listRowsMarkup(component) {
-  const rows = runtimeRecords || [];
-  if (!rows.length) return '<div class="list-empty">No database records</div>';
+  const apiSource = component.listDataSource === 'api';
+  const rows = apiSource ? (runtimeApiRows || []) : (runtimeRecords || []);
+  if (!rows.length) return `<div class="list-empty">${apiSource ? 'Search to load live results' : 'No database records'}</div>`;
   return rows.map((record, index) => {
     const image = component.listImageField ? String(record[component.listImageField] ?? '') : '';
-    const title = component.listTitleField ? formatValue(component.listTitleField, record[component.listTitleField]) : '';
-    const subtitle = component.listSubtitleField ? formatValue(component.listSubtitleField, record[component.listSubtitleField]) : '';
+    const title = component.listTitleField ? (apiSource ? String(record[component.listTitleField] ?? '') : formatValue(component.listTitleField, record[component.listTitleField])) : '';
+    const subtitle = component.listSubtitleField ? (apiSource ? String(record[component.listSubtitleField] ?? '') : formatValue(component.listSubtitleField, record[component.listSubtitleField])) : '';
     return `<div class="data-list-row layout-${attr(component.listLayout || 'image-title-subtitle')}" data-list-index="${index}">
       ${component.listLayout?.includes('image') ? `<div class="list-row-image">${image ? `<img src="${attr(image)}" alt="">` : '<span>🖼️</span>'}</div>` : ''}
-      ${component.listLayout !== 'image-only' ? `<div class="list-row-copy">${component.listLayout?.includes('title') ? `<strong>${esc(title || `Record ${index + 1}`)}</strong>` : ''}${component.listLayout?.includes('subtitle') ? `<span>${esc(subtitle)}</span>` : ''}</div>` : ''}
+      ${component.listLayout !== 'image-only' ? `<div class="list-row-copy">${component.listLayout?.includes('title') ? `<strong>${esc(title || `${apiSource ? 'Result' : 'Record'} ${index + 1}`)}</strong>` : ''}${component.listLayout?.includes('subtitle') ? `<span>${esc(subtitle)}</span>` : ''}</div>` : ''}
       ${component.navigateToPage ? '<div class="list-row-arrow">›</div>' : ''}
     </div>`;
   }).join('');
@@ -236,11 +243,14 @@ function componentMarkup(component) {
   const style = `left:${Number(component.x) || 0}px;top:${Number(component.y) || 0}px;width:${Number(component.w) || 100}px;height:${Number(component.h) || 44}px;${hidden?'display:none;':''}`;
   const textColour = attr(component.textColor || '#172033');
   const background = attr(component.backgroundColor || 'transparent');
+  const directApi = component.contentSource === 'api' && component.apiField;
+  const apiRaw = directApi ? runtimeApiResult?.[component.apiField] : undefined;
+  const apiValue = directApi ? (apiRaw !== undefined && apiRaw !== null && apiRaw !== '' ? apiRaw : (component.type === 'image' ? (component.src || '') : '')) : '';
   let inner = '';
-  if (component.type === 'label') inner = `<div class="label align-${attr(component.align || 'left')}" style="font-size:${Number(component.fontSize) || 16}px;text-align:${attr(component.align || 'left')};color:${textColour};background:${background}">${esc(component.text || 'Label')}</div>`;
+  if (component.type === 'label') inner = `<div class="label align-${attr(component.align || 'left')}" style="font-size:${Number(component.fontSize) || 16}px;text-align:${attr(component.align || 'left')};color:${textColour};background:${background}">${esc(directApi ? apiValue : (component.text || 'Label'))}</div>`;
   if (component.type === 'button') inner = `<button style="background:${attr(component.backgroundColor || '#5b5ce2')};color:${attr(component.textColor || '#ffffff')}">${esc(component.text || 'Button')}</button>`;
-  if (component.type === 'image') inner = `<img src="${attr(component.src || '')}" alt="">`;
-  if (component.type === 'input') inner = `<div class="text-box-component" style="background:${attr(component.backgroundColor || '#ffffff')};color:${textColour}">${esc(component.text || 'Long text appears here')}</div>`;
+  if (component.type === 'image') inner = `<img src="${attr(directApi ? apiValue : (component.src || ''))}" alt="">`;
+  if (component.type === 'input') inner = `<div class="text-box-component" style="background:${attr(component.backgroundColor || '#ffffff')};color:${textColour}">${esc(directApi ? apiValue : (component.text || 'Long text appears here'))}</div>`;
   if (component.type === 'textInput') inner = `<input class="interactive-input" data-interactive-value type="text" placeholder="${attr(component.placeholder||'Type here...')}" value="${attr(runtimeValues[component.id]??'')}" style="background:${background};color:${textColour}">`;
   if (component.type === 'numberInput') inner = `<input class="interactive-input" data-interactive-value type="number" placeholder="${attr(component.placeholder||'Enter a number')}" value="${attr(runtimeValues[component.id]??'')}" style="background:${background};color:${textColour}">`;
   if (component.type === 'dropdown') { const value=String(runtimeValues[component.id]??''),opts=dropdownOptions(component); inner=`<select class="interactive-input" data-interactive-value style="background:${background};color:${textColour}">${opts.map((o,i)=>`<option value="${attr(o)}" ${(value===o||(!value&&i===0))?'selected':''}>${esc(o)}</option>`).join('')}</select>`; }
@@ -291,8 +301,13 @@ function render() {
     if (!id || Number.isNaN(index)) return;
     const component = project.components.find(item => item.id === id);
     const before = currentPageId;
-    currentRecord = index;
-    log(`${nameOfComponent(id)} selected record ${index + 1}`);
+    if (component?.listDataSource === 'api') {
+      runtimeApiResult = runtimeApiRows[index] || runtimeApiResult;
+      log(`${nameOfComponent(id)} selected live result ${index + 1}`);
+    } else {
+      currentRecord = index;
+      log(`${nameOfComponent(id)} selected record ${index + 1}`);
+    }
     await runEvent('list_click', id, {pageId:before, index});
     if (currentPageId === before && component?.navigateToPage) await navigate(component.navigateToPage, true);
     else render();
@@ -371,7 +386,7 @@ async function executeActions(actions=[]){
     if(block.type==='set_variable'){runtimeVariables[block.name||'score']=parseLiteral(block.value);continue;}
     if(block.type==='change_variable'){const name=block.name||'score';runtimeVariables[name]=(Number(runtimeVariables[name])||0)+(Number(block.amount)||0);continue;}
     if(block.type==='set_from_variable'){applyRuntimeValueToTarget(block.target,runtimeVariables[block.name||'score']??0);continue;}
-    if(block.type==='api_request'){try{runtimeApiResult=await fetchApiData(project.apiService,runtimeValues[block.source]);runtimeApiSuccess=true;runtimeApiError='';log(`${apiServiceInfo(project.apiService).name} request succeeded`);}catch(err){runtimeApiResult={};runtimeApiSuccess=false;runtimeApiError=err.message||'API request failed';log(`API request failed: ${runtimeApiError}`);}continue;}
+    if(block.type==='api_request'){try{const response=await fetchApiResponse(project.apiService,runtimeValues[block.source]);runtimeApiResult=response.primary;runtimeApiRows=response.rows||[];runtimeApiSuccess=true;runtimeApiError='';log(`${apiServiceInfo(project.apiService).name} request returned ${runtimeApiRows.length} result${runtimeApiRows.length===1?'':'s'}`);}catch(err){runtimeApiResult={};runtimeApiRows=[];runtimeApiSuccess=false;runtimeApiError=err.message||'API request failed';log(`API request failed: ${runtimeApiError}`);}continue;}
     if(block.type==='set_from_api'){applyRuntimeValueToTarget(block.target,runtimeApiResult?.[block.field]??'');continue;}
     if(block.type==='if_api_success'){await executeActions(runtimeApiSuccess?(block.then||[]):(block.else||[]));continue;}
     if(block.type==='add_record_form'){const row={};for(const field of project.fields||[])row[field.id]=defaultValueForField(field);applyFormInputs(row);fillAutomaticId(row);runtimeRecords.push(row);currentRecord=runtimeRecords.length-1;saveRuntimeRecords();continue;}

@@ -1,8 +1,6 @@
-# DataApp Studio — classroom V1.23
+# DataApp Studio — classroom V1.24
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.23 makes Level 5 Connected App projects API-first: pupils begin in Connect, not in an empty database.
-
-
+A child-friendly database + app builder aimed at roughly age 12–13. V1.24 makes API projects more visual and beginner-friendly, and lets teachers release one assignment to selected pupils progressively.
 
 
 
@@ -14,6 +12,23 @@ A child-friendly database + app builder aimed at roughly age 12–13. V1.23 make
 
 
 
+
+
+
+## New in V1.24
+
+- **List is now a universal data component.** At Level 5 its Data source can be either **My database** or the currently **Connected API**.
+- API Lists use the same familiar Image / Title / Subtitle field mapping as database Lists. The field dropdowns automatically show the fields provided by the chosen API.
+- New Lists added in a Level 5 project default to the Connected API and sensible fields, so pupils are not dropped into an empty database-style List.
+- **Book Search now returns up to 12 matching books**, making it a genuine multi-row API List example. Weather and Pokédex remain single-result searches but can still feed a List row or individual components.
+- **Labels, scrollable Text boxes and Images can bind directly to an API field in Design.** Pupils choose **Content source → Connected API → field** rather than needing a separate Blockly output block for every value.
+- After an API request succeeds, directly bound components and API Lists refresh automatically in Test and in published/installed apps.
+- Tapping a row in an API List makes that row the **current live API result**, allowing a familiar List → Details pattern with API data.
+- The Level 5 tutorial now teaches: **Connect fields visually in Design → use Blocks to decide when the request happens → handle success/failure**.
+- Teachers can now create an assignment for **Whole class** or **Selected pupils only**.
+- A selected-pupil assignment remains one assignment. The teacher can click **Manage pupils** later and add more pupils as they become ready instead of creating duplicate assignments.
+- Existing assignments automatically behave as **Whole class**, so no migration work is needed.
+- No Firebase rule changes are required for V1.24.
 
 ## New in V1.23
 

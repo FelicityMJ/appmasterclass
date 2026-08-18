@@ -7,8 +7,11 @@ export const API_CATALOG = {
     queryLabel:'Town or city',
     placeholder:'e.g. Glasgow',
     description:'Search a place and use live weather data in your app.',
+    resultKind:'single',
+    resultHint:'One search gives one weather result. Use Labels, Text boxes or an Image to show its fields; a List can also show that one result.',
+    listDefaults:{layout:'title-subtitle',image:'',title:'place',subtitle:'conditions'},
     fields:[
-      ['place','Place'],['country','Country'],['temperature','Temperature °C'],['feelsLike','Feels like °C'],['conditions','Conditions'],['windSpeed','Wind speed km/h']
+      ['place','Place','text'],['country','Country','text'],['temperature','Temperature °C','text'],['feelsLike','Feels like °C','text'],['conditions','Conditions','text'],['windSpeed','Wind speed km/h','text']
     ]
   },
   books: {
@@ -18,9 +21,12 @@ export const API_CATALOG = {
     provider:'Open Library',
     queryLabel:'Book, author or topic',
     placeholder:'e.g. Harry Potter',
-    description:'Search Open Library and use the first matching book result.',
+    description:'Search Open Library and use several matching books in your app.',
+    resultKind:'multiple',
+    resultHint:'One search can give several books. This works especially well with a List component.',
+    listDefaults:{layout:'image-title-subtitle',image:'coverUrl',title:'title',subtitle:'author'},
     fields:[
-      ['title','Book title'],['author','Author'],['year','First published'],['coverUrl','Cover image URL']
+      ['title','Book title','text'],['author','Author','text'],['year','First published','text'],['coverUrl','Cover image','image']
     ]
   },
   pokemon: {
@@ -31,8 +37,11 @@ export const API_CATALOG = {
     queryLabel:'Pokémon name or number',
     placeholder:'e.g. pikachu',
     description:'Look up a Pokémon by its name or Pokédex number.',
+    resultKind:'single',
+    resultHint:'One search gives one Pokémon. Bind its fields straight to Labels or an Image, or show the result as one List row.',
+    listDefaults:{layout:'image-title-subtitle',image:'imageUrl',title:'name',subtitle:'types'},
     fields:[
-      ['name','Name'],['number','Pokédex number'],['types','Type(s)'],['heightM','Height (m)'],['weightKg','Weight (kg)'],['imageUrl','Artwork image URL']
+      ['name','Name','text'],['number','Pokédex number','text'],['types','Type(s)','text'],['heightM','Height (m)','text'],['weightKg','Weight (kg)','text'],['imageUrl','Artwork image','image']
     ]
   }
 };
@@ -83,16 +92,19 @@ async function weatherLookup(query){
     windSpeed:Number(current.wind_speed_10m)
   };
 }
-async function bookLookup(query){
-  const data=await fetchJson(`https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=1&fields=title,author_name,first_publish_year,cover_i,key`);
-  const book=data?.docs?.[0];
-  if(!book)throw new Error('No matching book was found. Try another title, author or topic.');
+function mapBook(book){
   return {
-    title:book.title||'Untitled',
-    author:Array.isArray(book.author_name)?book.author_name.slice(0,3).join(', '):(book.author_name||'Unknown'),
-    year:book.first_publish_year??'',
-    coverUrl:book.cover_i?`https://covers.openlibrary.org/b/id/${book.cover_i}-M.jpg`:''
+    title:book?.title||'Untitled',
+    author:Array.isArray(book?.author_name)?book.author_name.slice(0,3).join(', '):(book?.author_name||'Unknown'),
+    year:book?.first_publish_year??'',
+    coverUrl:book?.cover_i?`https://covers.openlibrary.org/b/id/${book.cover_i}-M.jpg`:''
   };
+}
+async function bookSearch(query){
+  const data=await fetchJson(`https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=12&fields=title,author_name,first_publish_year,cover_i,key`);
+  const rows=(data?.docs||[]).slice(0,12).map(mapBook);
+  if(!rows.length)throw new Error('No matching book was found. Try another title, author or topic.');
+  return rows;
 }
 async function pokemonLookup(query){
   const cleaned=String(query).trim().toLowerCase().replace(/\s+/g,'-');
@@ -109,10 +121,21 @@ async function pokemonLookup(query){
   };
 }
 
-export async function fetchApiData(serviceId, query){
+export async function fetchApiResponse(serviceId, query){
   const q=String(query??'').trim();
   if(!q)throw new Error('Enter something to search for first.');
-  if(serviceId==='books')return bookLookup(q);
-  if(serviceId==='pokemon')return pokemonLookup(q);
-  return weatherLookup(q);
+  if(serviceId==='books'){
+    const rows=await bookSearch(q);
+    return {primary:rows[0],rows};
+  }
+  if(serviceId==='pokemon'){
+    const primary=await pokemonLookup(q);
+    return {primary,rows:[primary]};
+  }
+  const primary=await weatherLookup(q);
+  return {primary,rows:[primary]};
+}
+
+export async function fetchApiData(serviceId, query){
+  return (await fetchApiResponse(serviceId,query)).primary;
 }
