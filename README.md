@@ -1,8 +1,6 @@
-# DataApp Studio — classroom V1.22
+# DataApp Studio — classroom V1.23
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.22 keeps the V1.21 project/API pathway and fixes long teacher dialogs so assignment creation remains fully scrollable on smaller screens.
-
-
+A child-friendly database + app builder aimed at roughly age 12–13. V1.23 makes Level 5 Connected App projects API-first: pupils begin in Connect, not in an empty database.
 
 
 
@@ -14,6 +12,20 @@ A child-friendly database + app builder aimed at roughly age 12–13. V1.22 keep
 
 
 
+
+
+
+## New in V1.23
+
+- **Level 5 — Connected App now starts in Connect**, not Data, whenever a pupil starts or reopens the project.
+- The Level 5 main pathway is now **1. Connect → 2. Design → 3. Blocks → 4. Test → 5. Publish**.
+- The Level 5 tutorial no longer asks pupils to name or build a database before using an API; Step 1 is **Choose and test a live API**.
+- Connect now clearly says **Start here — no database needed** and explains what to do first.
+- Local database data is still available under **Advanced: add local database data (optional)** for hybrid projects.
+- Opening that optional Data workspace shows a clear message and a one-click route back to Connect.
+- The teacher assignment dialog now explains that Level 5 starts in Connect and that database records are optional.
+- Existing Level 5 projects are not converted or erased; they simply open on Connect next time.
+- No Firebase rule changes are required.
 
 ## New in V1.22
 

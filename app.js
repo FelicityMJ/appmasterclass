@@ -231,7 +231,7 @@ const CAPABILITY_LEVELS = {
   2:{name:'Interactive App',short:'Inputs + decisions',description:'Adds text/number inputs, dropdowns, switches, sliders, messages, show/hide and IF / ELSE.'},
   3:{name:'Data Creator',short:'Change data',description:'Adds blocks to create, update and delete records from form inputs.'},
   4:{name:'Smart App',short:'Variables',description:'Adds simple variables and counters while keeping every earlier tool.'},
-  5:{name:'Connected App',short:'Live APIs + JSON',description:'Adds a curated Web/API toolbox so apps can request live weather, book or Pokédex data.'}
+  5:{name:'Connected App',short:'Live APIs + JSON',description:'Starts in Connect with a curated Web/API toolbox for live weather, book or Pokédex data. A local database is optional.'}
 };
 const PROJECT_BRIEFS = {
   1:{title:'Collection Explorer',emoji:'🗺️',mission:'Build a polished two-page app that lets somebody browse a collection and tap an item to discover more.',story:'Choose a topic you genuinely like — football teams, musicians, animals, places, films or another collection.',journey:['Home shows a scrollable collection','The user taps one item','One reusable Details page displays that selected record','Back returns to the collection'],skills:['Create useful database fields and records','Build a scrollable List on Home','Reuse one Details page for every record','Use selected-record and navigation blocks'],success:['At least 3 records','A working List → Details journey','At least 2 database fields displayed on Details','A Back button that works']},
@@ -242,6 +242,7 @@ const PROJECT_BRIEFS = {
 };
 function capabilityInfo(level){return CAPABILITY_LEVELS[Math.max(1,Math.min(5,Number(level)||1))]||CAPABILITY_LEVELS[1];}
 function projectCapabilityLevel(){return Math.max(1,Math.min(5,Number(state.project?.capabilityLevel)||1));}
+function builderStartTabFor(project=state.project){return Math.max(1,Math.min(5,Number(project?.capabilityLevel)||1))>=5?'api':'data';}
 function capabilityLabel(level){const n=Math.max(1,Math.min(5,Number(level)||1)),info=capabilityInfo(n);return `Level ${n} — ${info.name}`;}
 function projectBrief(level){return PROJECT_BRIEFS[Math.max(1,Math.min(5,Number(level)||1))]||PROJECT_BRIEFS[1];}
 function currentAssignment(){return state.assignments.find(a=>a.id===state.project?.assignmentId)||null;}
@@ -353,7 +354,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.22</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.23</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this Google account has not been invited as a teacher yet.</p>
     <div class="notice"><b>Ask your DataApp Studio administrator to invite this exact Google email address.</b><div class="uid-box">${escapeHtml(state.user.email||'')}</div></div>
     <p class="muted">Once the administrator has invited the address, click <b>Check again</b>. The teacher account will be activated automatically; no Firebase UID needs to be copied.</p>
@@ -363,7 +364,7 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.22 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.23 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -508,14 +509,14 @@ function openTeacherPupil(uid){
 }
 function openTeacherProject(projectId){
   const found=(state.classProjects||[]).find(p=>p.ownerUid===state.teacherPupilUid&&projectIdOf(p)===projectId);if(!found)return;
-  state.project=cleanCloudProject(found);state.teacherInspectActive=true;state.currentRecord=0;state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.selectedComponent=null;state.view='builder';state.tab='data';render();
+  state.project=cleanCloudProject(found);state.teacherInspectActive=true;state.currentRecord=0;state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.selectedComponent=null;state.view='builder';state.tab=builderStartTabFor(state.project);render();
 }
 
 function builderView(){
   const inspect=state.teacherInspectActive&&state.role==='teacher';
   const connected=projectCapabilityLevel()>=5;
-  const tabs=connected?(inspect?['data','design','api','blocks','test']:['data','design','api','blocks','test','publish']):(inspect?['data','design','blocks','test']:['data','design','blocks','test','publish']);
-  const labels=connected?{data:'1. 🗃 DATA',design:'2. 🎨 DESIGN',api:'3. 🌐 CONNECT',blocks:'4. 🧩 BLOCKS',test:'5. ▶ TEST',publish:'6. 🚀 PUBLISH'}:{data:'1. 🗃 DATA',design:'2. 🎨 DESIGN',blocks:'3. 🧩 BLOCKS',test:'4. ▶ TEST',publish:'5. 🚀 PUBLISH'};
+  const tabs=connected?(inspect?['api','design','blocks','test']:['api','design','blocks','test','publish']):(inspect?['data','design','blocks','test']:['data','design','blocks','test','publish']);
+  const labels=connected?{api:'1. 🌐 CONNECT',design:'2. 🎨 DESIGN',blocks:'3. 🧩 BLOCKS',test:'4. ▶ TEST',publish:'5. 🚀 PUBLISH',data:'OPTIONAL 🗃 DATA'}:{data:'1. 🗃 DATA',design:'2. 🎨 DESIGN',blocks:'3. 🧩 BLOCKS',test:'4. ▶ TEST',publish:'5. 🚀 PUBLISH'};
   return `<div class="builder ${inspect?'teacher-inspection':''}">
 <div class="builder-head"><button class="btn small" data-action="back-pupil">← ${inspect?'Pupil apps':'Dashboard'}</button><div class="project-title">${escapeHtml(state.project.name)}</div><span class="pill capability-pill">${escapeHtml(capabilityLabel(projectCapabilityLevel()))}</span>${inspect?`<span class="pill">Read-only teacher view</span>`:`<span class="mini-progress">${projectProgress()}% ready</span><span class="save-state">${CLOUD_MODE?'Cloud project':'Saved locally'}</span><button class="btn small tutorial-toggle" data-action="toggle-tutorial">${state.project.tutorialEnabled===false?'Show tutorial':'Hide tutorial'}</button><button class="btn small" data-action="reset">Clear project</button>`}</div>
 <div class="step-tabs">${tabs.map(t=>`<button class="step-tab ${state.tab===t?'active':''}" data-tab="${t}">${labels[t]}</button>`).join('')}</div>
@@ -583,7 +584,7 @@ function tutorialSteps(){
     ];
   }
   const hasApiRequest=programHasType(program,'api_request'),hasApiOutput=programHasType(program,'set_from_api'),hasApiError=programHasType(program,'if_api_success');
-  return [...commonStart,
+  return [
     {tab:'api',title:'Choose and test a live API',done:state.project.apiTested===true,text:'Open Connect, choose Live Weather, Book Search or Pokédex, then try a real request in the API tester.',tip:'Notice the JSON field names — your app will use those same result fields.'},
     {tab:'design',title:'Build a search screen',done:comps.some(c=>c.type==='textInput')&&comps.some(c=>c.type==='button'),text:'Add a Text Input for the search, a button to send it, and labels or an image for the result.',tip:'The API does the lookup; your screen decides how the result feels to the user.'},
     {tab:'blocks',title:'Send the API request',done:hasApiRequest,text:'In Web / API, use “ask the selected API using …” inside your search button event.',tip:'The request uses whatever the user typed into your input.'},
@@ -600,13 +601,13 @@ function tutorialPanel(){
   return `${projectBriefPanel()}<section class="tutorial-panel">
     <div class="tutorial-top"><div><span class="tutorial-kicker">🧭 GUIDED TUTORIAL</span><h3>${completed===steps.length?'You built it yourself 🎉':`Step ${Math.min(completed+1,steps.length)} of ${steps.length}: ${escapeHtml(current.title)}`}</h3></div><strong>${completed}/${steps.length}</strong></div>
     <div class="tutorial-progress"><span style="width:${pct}%"></span></div>
-    ${completed===steps.length?`<p>You now have a database, interface and program that you created from a blank canvas. You can keep improving it or move to Publish.</p>`:
-    `<p>${escapeHtml(current.text)}</p><div class="tutorial-tip">💡 ${escapeHtml(current.tip)}</div><button class="btn primary small" data-tutorial-tab="${current.tab}">Go to ${cap(current.tab)} →</button>`}
+    ${completed===steps.length?`<p>You now have an app, interface and program that you created from a blank canvas. You can keep improving it or move to Publish.</p>`:
+    `<p>${escapeHtml(current.text)}</p><div class="tutorial-tip">💡 ${escapeHtml(current.tip)}</div><button class="btn primary small" data-tutorial-tab="${current.tab}">Go to ${current.tab==='api'?'Connect':cap(current.tab)} →</button>`}
     <details class="tutorial-all"><summary>See all tutorial steps</summary><ol>${steps.map(x=>`<li class="${x.done?'done':''}">${x.done?'✓':'○'} ${escapeHtml(x.title)}</li>`).join('')}</ol></details>
   </section>`;
 }
 
-function dataView(){return `<div class="section-head"><div><h2>Build your database</h2><p>Start from nothing: you choose the table, fields and records.</p></div><div><button class="btn" data-action="manage-images">🖼 My Images ${personalImageCount()}/${PERSONAL_IMAGE_LIMIT}</button> <button class="btn" data-action="add-field">+ Add field</button> <button class="btn primary" data-action="add-record" ${state.project.fields.length?'':'disabled title="Add a field first"'}>+ Add record</button></div></div>
+function dataView(){const apiOptional=projectCapabilityLevel()>=5?`<div class="notice api-optional-data-note"><b>Optional local data:</b> Level 5 starts in <b>Connect</b>. You do not need a database for the Live Info Finder unless your teacher asks you to combine API data with your own saved data. <button class="btn small" data-tab="api">← Back to Connect</button></div>`:'';return `${apiOptional}<div class="section-head"><div><h2>${projectCapabilityLevel()>=5?'Optional local database':'Build your database'}</h2><p>${projectCapabilityLevel()>=5?'Use this only if you want your Connected App to combine live API results with your own local records.':'Start from nothing: you choose the table, fields and records.'}</p></div><div><button class="btn" data-action="manage-images">🖼 My Images ${personalImageCount()}/${PERSONAL_IMAGE_LIMIT}</button> <button class="btn" data-action="add-field">+ Add field</button> <button class="btn primary" data-action="add-record" ${state.project.fields.length?'':'disabled title="Add a field first"'}>+ Add record</button></div></div>
 <div class="project-setup-grid">
   <div class="field"><label>My app is called</label><input id="projectNameInput" value="${escapeAttr(state.project.name)}" placeholder="e.g. My Animal Guide" maxlength="50"></div>
   <div class="field"><label>My database table is called</label><input id="tableNameInput" value="${escapeAttr(state.project.tableName)}" placeholder="e.g. Animals" maxlength="40"></div>
@@ -812,10 +813,12 @@ function apiPreviewMarkup(){
 function apiView(){
   if(projectCapabilityLevel()<5)return `<div class="notice warning">The Connect/API workspace unlocks at Level 5.</div>`;
   const current=apiServiceInfo(state.project.apiService),inspect=state.teacherInspectActive&&state.role==='teacher';
-  return `<div class="section-head"><div><h2>Connect to live data</h2><p>Choose one safe classroom API, test it here, then use the Web / API Blockly category.</p></div><span class="tag capability-tag">Level 5 only</span></div>
+  return `<div class="notice"><b>Start here — no database needed.</b> First choose the live information service your app will use, then test a search. After that you will design the screen and program the request.</div>
+  <div class="section-head"><div><h2>1. Choose your API</h2><p>Pick one safe classroom API and test a real request. The result fields you see here become available in Blockly later.</p></div><span class="tag capability-tag">Level 5 — Connected App</span></div>
   <div class="api-flow"><span>📱 Your app</span><b>→ request →</b><span>🌐 API</span><b>→ JSON →</b><span>✨ Your screen</span></div>
   <div class="api-library">${Object.values(API_CATALOG).map(api=>`<button class="api-card ${api.id===current.id?'active':''}" data-api-service="${escapeAttr(api.id)}" ${inspect?'disabled':''}><span class="api-emoji">${api.emoji}</span><b>${escapeHtml(api.name)}</b><small>${escapeHtml(api.provider)}</small><p>${escapeHtml(api.description)}</p></button>`).join('')}</div>
-  <div class="api-workbench"><section class="card"><div class="project-meta"><span class="tag">Selected API</span><span class="tag tag-good">No pupil API key</span></div><h3>${current.emoji} ${escapeHtml(current.name)}</h3><p class="muted">${escapeHtml(current.description)}</p><label>${escapeHtml(current.queryLabel)}</label><div class="api-test-row"><input id="apiTestQuery" value="${escapeAttr(state.apiTestQuery||'')}" placeholder="${escapeAttr(current.placeholder)}"><button class="btn primary" data-action="test-api" ${inspect?'':' '}>▶ Test request</button></div><h4>Result fields available in Blockly</h4><div class="api-field-chips">${current.fields.map(([key,label])=>`<span title="JSON field: ${escapeAttr(key)}">${escapeHtml(label)} <code>${escapeHtml(key)}</code></span>`).join('')}</div><div class="notice"><b>Classroom safety:</b> these connectors use curated public endpoints and do not ask pupils to paste secret API keys into their apps.</div></section><section class="card api-preview"><h3>API response</h3>${apiPreviewMarkup()}</section></div>`;
+  <div class="api-workbench"><section class="card"><div class="project-meta"><span class="tag">Selected API</span><span class="tag tag-good">No pupil API key</span></div><h3>${current.emoji} ${escapeHtml(current.name)}</h3><p class="muted">${escapeHtml(current.description)}</p><label>${escapeHtml(current.queryLabel)}</label><div class="api-test-row"><input id="apiTestQuery" value="${escapeAttr(state.apiTestQuery||'')}" placeholder="${escapeAttr(current.placeholder)}"><button class="btn primary" data-action="test-api" ${inspect?'':' '}>▶ Test request</button></div><h4>Result fields available in Blockly</h4><div class="api-field-chips">${current.fields.map(([key,label])=>`<span title="JSON field: ${escapeAttr(key)}">${escapeHtml(label)} <code>${escapeHtml(key)}</code></span>`).join('')}</div><div class="notice"><b>Classroom safety:</b> these connectors use curated public endpoints and do not ask pupils to paste secret API keys into their apps.</div></section><section class="card api-preview"><h3>API response</h3>${apiPreviewMarkup()}</section></div>
+  <details class="card"><summary><b>Advanced: add local database data (optional)</b></summary><p class="muted">Most Level 5 Live Info Finder apps do not need any database fields or records. Open this only if you want to combine live API information with your own local data.</p><button class="btn small" data-tab="data">Open optional Data workspace →</button></details>`;
 }
 function bindApi(){
   $$('[data-api-service]').forEach(btn=>btn.onclick=()=>{const next=btn.dataset.apiService;if(!API_CATALOG[next]||next===state.project.apiService)return;state.project.apiService=next;const valid=new Set(apiServiceInfo(next).fields.map(([key])=>key)),fallback=apiServiceInfo(next).fields[0]?.[0]||'';const fix=items=>(items||[]).forEach(item=>{if(item.type==='set_from_api'&&!valid.has(item.field))item.field=fallback;fix(item.then);fix(item.else)});fix(state.project.program);state.project.blocklyPages={};state.apiPreview=null;state.apiPreviewError='';state.apiTestQuery='';saveProject();render();});
@@ -942,7 +945,7 @@ function bindCommon(){
     state.view='landing';state.role=null;state.user=null;state.classes=[];state.currentClass=null;state.teacherAdmin=false;state.teacherInvites=[];state.teacherAccounts=[];state.teacherInspectActive=false;state.teacherPupilUid='';render();
   });
   $$('[data-action="check-teacher"]').forEach(b=>b.onclick=async()=>{await finishSignedInUser(state.user,'teacher')});
-  $$('[data-action="open-builder"]').forEach(b=>b.onclick=()=>{state.project=normaliseProject(state.project);state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.view='builder';state.tab='data';if(state.project.tutorialEnabled===undefined)state.project.tutorialEnabled=true;render()});
+  $$('[data-action="open-builder"]').forEach(b=>b.onclick=()=>{state.project=normaliseProject(state.project);state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.view='builder';state.tab=builderStartTabFor(state.project);if(state.project.tutorialEnabled===undefined)state.project.tutorialEnabled=true;render()});
   $$('[data-action="new-app"]').forEach(b=>b.onclick=showNewAppModal);
   $$('[data-open-project]').forEach(b=>b.onclick=()=>openPupilProject(b.dataset.openProject));
   $$('[data-rename-project]').forEach(b=>b.onclick=()=>renamePupilProject(b.dataset.renameProject));
@@ -1337,7 +1340,7 @@ function startAssignment(id){
   state.project.tutorialEnabled=(a.tutorialMode||'guided')!=='checklist';
   state.project.updatedAtMs=Date.now(); addProjectToList(state.project);
   state.selectedComponent=null; state.currentRecord=0; state.currentPageId=state.project.pages[0].id; state.pageHistory=[]; state.role=state.role||'pupil';
-  saveProject(); state.view='builder'; state.tab='data'; render();
+  saveProject(); state.view='builder'; state.tab=builderStartTabFor(state.project); render();
 }
 function showNewAppModal(){
   if((state.cloudProjects||[]).length>=MAX_PUPIL_APPS){alert(`You can keep up to ${MAX_PUPIL_APPS} apps in a class. Delete an old app before creating another.`);return;}
@@ -1349,7 +1352,7 @@ function showNewAppModal(){
 function findPupilProject(id){ return (state.cloudProjects||[]).find(p=>projectIdOf(p)===id); }
 function openPupilProject(id){
   const found=findPupilProject(id);if(!found)return;
-  state.project=cleanCloudProject(found);state.currentRecord=0;state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.selectedComponent=null;localStorage.setItem('dataapp_project',JSON.stringify(state.project));state.view='builder';state.tab='data';render();
+  state.project=cleanCloudProject(found);state.currentRecord=0;state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.selectedComponent=null;localStorage.setItem('dataapp_project',JSON.stringify(state.project));state.view='builder';state.tab=builderStartTabFor(state.project);render();
 }
 async function renamePupilProject(id){
   const found=findPupilProject(id);if(!found)return;const project=cleanCloudProject(found);const name=prompt('Rename this app:',project.name||'My App');if(name===null)return;const trimmed=name.trim();if(!trimmed)return;
@@ -1378,7 +1381,7 @@ function showAssignmentModal(){
   const wrap=document.createElement('div');wrap.className='modal-backdrop';
   wrap.innerHTML=`<div class="modal capability-modal"><h3>Create an assignment</h3>
   <div class="field"><label>Assignment title</label><input id="assignmentTitle" value="Collection Explorer"></div>
-  <div class="notice">Every pupil starts this assignment with a blank database, screen and block canvas. <b>The capability level controls which tools they can see.</b></div>
+  <div class="notice">Every pupil starts with a blank app. <b>The capability level controls which tools they can see.</b> Level 5 Connected Apps start in <b>Connect</b>; a local database is optional.</div>
   <div class="field"><label>Project capability</label><select id="assignmentCapability">
     ${[1,2,3,4,5].map(n=>`<option value="${n}" ${n===1?'selected':''}>${escapeHtml(capabilityLabel(n))} — ${escapeHtml(capabilityInfo(n).short)}</option>`).join('')}
   </select><small class="prop-help" id="capabilityHelp">${escapeHtml(capabilityInfo(1).description)}</small></div>
@@ -1389,7 +1392,7 @@ function showAssignmentModal(){
   <div class="field"><label>Extra instructions for this class (optional)</label><textarea id="assignmentInstructions" rows="3" placeholder="e.g. Use a Scottish location, or work with your partner's test data."></textarea></div>
   <div class="field"><label>Pupil support</label><select id="assignmentTutorial"><option value="guided" selected>Guided tutorial — step by step</option><option value="checklist">Checklist only — more independent</option></select></div>
   <div class="field"><label>Support level label</label><select id="assignmentLevel"><option>Starter</option><option selected>Guided</option><option>Independent</option></select></div>
-  <div class="field"><label>Minimum records</label><input id="assignmentRecords" type="number" value="3" min="0" max="30"><small class="prop-help">Levels 2, 4 and 5 can be interactive without needing database records.</small></div>
+  <div class="field"><label>Minimum records</label><input id="assignmentRecords" type="number" value="3" min="0" max="30"><small class="prop-help">Levels 2 and 4 can be interactive without records. Level 5 starts with an API; local database records are optional.</small></div>
   <div class="modal-actions"><button class="btn" id="cancelAssignment">Cancel</button><button class="btn primary" id="createAssignment">Create</button></div></div>`;
   document.body.appendChild(wrap);
   $('#cancelAssignment').onclick=()=>wrap.remove();
