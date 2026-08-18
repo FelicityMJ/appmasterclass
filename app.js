@@ -13,6 +13,7 @@ import {
 } from './firebase-service.js';
 import { initBlocklyEditor } from './blockly-integration.js';
 import { publicAppBaseUrl } from './public-host.js';
+import { API_CATALOG, apiServiceInfo, fetchApiData } from './api-connectors.js';
 
 const $ = (sel, root=document) => root.querySelector(sel);
 const $$ = (sel, root=document) => [...root.querySelectorAll(sel)];
@@ -114,16 +115,19 @@ const projectTemplates = {
     program:[],
     tutorialEnabled:true,
     blocklyState:null,
-    blocklyPages:{}
+    blocklyPages:{},
+    capabilityLevel:1,
+    apiService:'weather'
   }
 };
 
-function freshBlankProject(name='My New App', assignmentId=''){
+function freshBlankProject(name='My New App', assignmentId='', capabilityLevel=1){
   const project=clone(projectTemplates.blank);
   project.id=`project-${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
   project.name=name||'My New App';
   project.publish.appName=project.name;
   project.assignmentId=assignmentId||'';
+  project.capabilityLevel=Math.max(1,Math.min(5,Number(capabilityLevel)||1));
   project.tutorialEnabled=true;
   return normaliseProject(project);
 }
@@ -132,6 +136,8 @@ function normaliseProject(project){
   if(!Array.isArray(project.pages)||!project.pages.length) project.pages=[{id:'screen1',name:'Home',backgroundColor:'#ffffff'}];
   project.pages=project.pages.map((pg,i)=>({id:pg.id||`screen${i+1}`,name:pg.name||`Page ${i+1}`,backgroundColor:pg.backgroundColor||'#ffffff'}));
   const first=project.pages[0].id;
+  project.capabilityLevel=Math.max(1,Math.min(5,Number(project.capabilityLevel)||1));
+  if(!API_CATALOG[project.apiService])project.apiService='weather';
   project.fields=Array.isArray(project.fields)?project.fields:[];
   for(const f of project.fields){
     if(f.type==='text') f.type='shortText';
@@ -140,7 +146,16 @@ function normaliseProject(project){
   for(const c of project.components){
     if(!c.pageId||!project.pages.some(p=>p.id===c.pageId))c.pageId=first;
     if(c.textColor===undefined)c.textColor=c.type==='button'?'#ffffff':'#172033';
-    if(c.backgroundColor===undefined)c.backgroundColor=c.type==='button'?'#5b5ce2':c.type==='input'?'#ffffff':'';
+    if(c.backgroundColor===undefined)c.backgroundColor=c.type==='button'?'#5b5ce2':['input','textInput','numberInput','dropdown','switch','slider'].includes(c.type)?'#ffffff':'';
+    if(c.visible===undefined)c.visible=true;
+    if(['textInput','numberInput','dropdown','switch','slider'].includes(c.type)){
+      if(c.placeholder===undefined)c.placeholder=c.type==='numberInput'?'Enter a number':'Type here...';
+      if(c.defaultValue===undefined)c.defaultValue=c.type==='switch'?false:c.type==='slider'?50:'';
+      if(c.dataField===undefined)c.dataField='';
+      if(c.type==='dropdown'&&c.options===undefined)c.options='Option 1\nOption 2\nOption 3';
+      if(c.type==='slider'){if(c.min===undefined)c.min=0;if(c.max===undefined)c.max=100;if(c.step===undefined)c.step=1;}
+      if(c.type==='switch'&&!c.text)c.text='On / Off';
+    }
     if(c.type==='list'){
       c.listBackground=c.listBackground||(c.listTransparent?'transparent':'white');
       c.listTransparent=c.listBackground==='transparent';
@@ -211,8 +226,35 @@ function addProjectToList(project){
 function assignmentTitle(id){ return state.assignments.find(a=>a.id===id)?.title||''; }
 function publishedStatus(project){ return project?.publish?.isPublished?'Published':'Draft'; }
 
+const CAPABILITY_LEVELS = {
+  1:{name:'Database Explorer',short:'Display data',description:'Database, pages, lists, details, buttons and navigation only.'},
+  2:{name:'Interactive App',short:'Inputs + decisions',description:'Adds text/number inputs, dropdowns, switches, sliders, messages, show/hide and IF / ELSE.'},
+  3:{name:'Data Creator',short:'Change data',description:'Adds blocks to create, update and delete records from form inputs.'},
+  4:{name:'Smart App',short:'Variables',description:'Adds simple variables and counters while keeping every earlier tool.'},
+  5:{name:'Connected App',short:'Live APIs + JSON',description:'Adds a curated Web/API toolbox so apps can request live weather, book or Pokédex data.'}
+};
+const PROJECT_BRIEFS = {
+  1:{title:'Collection Explorer',emoji:'🗺️',mission:'Build a polished two-page app that lets somebody browse a collection and tap an item to discover more.',story:'Choose a topic you genuinely like — football teams, musicians, animals, places, films or another collection.',journey:['Home shows a scrollable collection','The user taps one item','One reusable Details page displays that selected record','Back returns to the collection'],skills:['Create useful database fields and records','Build a scrollable List on Home','Reuse one Details page for every record','Use selected-record and navigation blocks'],success:['At least 3 records','A working List → Details journey','At least 2 database fields displayed on Details','A Back button that works']},
+  2:{title:'Pet Match',emoji:'🐾',mission:'Build an app that asks about somebody’s lifestyle and recommends a type of pet using their answers.',story:'Your user should feel as if the app is interviewing them, not as if they are completing a programming worksheet.',journey:['Ask about the user with a Dropdown, Switch or Slider','They tap “Find my match”','IF / ELSE decides which recommendation to show','Change the answers and the recommendation changes'],skills:['Text/dropdown/switch/slider inputs','Button events','IF / ELSE decisions','Messages or changing screen content'],success:['At least 2 different user inputs','At least one IF / ELSE decision','Clearly different responses for different answers','Test both sides of the decision']},
+  3:{title:'My Review Tracker',emoji:'⭐',mission:'Build an app where the user can add, edit and remove their own reviews.',story:'It could track films, games, books, restaurants, songs or places. The app should feel like a real little personal database.',journey:['The user fills in a short review form','Save adds it to the database','They select an existing review to change it','Edit or Delete updates what the app shows'],skills:['Design a data-entry form','Map controls to database fields','Add/update/delete records','Use confirmation or feedback messages'],success:['At least 3 useful fields','A form that adds a record','An edit or delete action','The changed data appears in the app']},
+  4:{title:'Eco Challenge',emoji:'🌱',mission:'Build a points app that remembers a score while it is running.',story:'Users earn points for positive actions such as walking, reusing a bottle or switching off unused lights. You can choose a different challenge theme if you prefer.',journey:['The app starts with a score of 0','Different action buttons add different points','The score changes on screen immediately','Optional IF / ELSE celebrates a target score'],skills:['Create and change variables','Display a changing variable','Use several button events','Combine variables with earlier IF / ELSE skills'],success:['A score/count variable','At least 2 actions that change it','The score is visible on screen','Repeated presses behave correctly']},
+  5:{title:'Live Info Finder',emoji:'🌐',mission:'Build an app that searches a real internet API and turns the returned JSON data into a friendly phone screen.',story:'Choose Live Weather, Book Search or Pokédex. The user types a search, your app sends a request, then displays the useful result fields.',journey:['The user types a place, book or Pokémon','Search sends that value to the selected API','The API replies with JSON','Your app displays at least three useful result fields and handles failure'],skills:['Understand request → API → JSON → app','Send an input value to a curated API','Display several API result fields','Handle a failed request'],success:['One searchable input','A working API request','At least 3 live result values shown','A clear success/failure response']}
+};
+function capabilityInfo(level){return CAPABILITY_LEVELS[Math.max(1,Math.min(5,Number(level)||1))]||CAPABILITY_LEVELS[1];}
+function projectCapabilityLevel(){return Math.max(1,Math.min(5,Number(state.project?.capabilityLevel)||1));}
+function capabilityLabel(level){const n=Math.max(1,Math.min(5,Number(level)||1)),info=capabilityInfo(n);return `Level ${n} — ${info.name}`;}
+function projectBrief(level){return PROJECT_BRIEFS[Math.max(1,Math.min(5,Number(level)||1))]||PROJECT_BRIEFS[1];}
+function currentAssignment(){return state.assignments.find(a=>a.id===state.project?.assignmentId)||null;}
+function projectBriefPanel(level=projectCapabilityLevel()){
+  const b=projectBrief(level),assignment=currentAssignment(),extra=assignment?.teacherInstructions?.trim();
+  return `<details class="project-brief" ${state.project?.assignmentId?'open':''}><summary><span>${b.emoji}</span><div><b>Project brief: ${escapeHtml(b.title)}</b><small>${escapeHtml(b.mission)}</small></div><span class="brief-chevron">⌄</span></summary><div class="project-brief-body"><p class="brief-story">${escapeHtml(b.story)}</p>${extra?`<div class="notice"><b>Your teacher says:</b> ${escapeHtml(extra)}</div>`:''}${b.journey?.length?`<div class="brief-journey"><h4>How the app should feel to the user</h4><ol>${b.journey.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ol></div>`:''}<div class="brief-columns"><div><h4>What you will practise</h4><ul>${b.skills.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div><div><h4>Success looks like</h4><ul>${b.success.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></div></div></div></details>`;
+}
+function interactiveComponentType(type){return ['textInput','numberInput','dropdown','switch','slider'].includes(type);}
+function programSome(program,predicate){for(const item of program||[]){if(predicate(item))return true;if(programSome(item.then,predicate)||programSome(item.else,predicate))return true;}return false;}
+function programHasType(program,types){const set=new Set(Array.isArray(types)?types:[types]);return programSome(program,item=>set.has(item.type));}
+
 const defaultAssignments = [
-  {id:'a-first',title:'My First Database App',template:'blank',level:'Guided',tutorialMode:'guided',requirements:{records:3,components:4,blocks:4}}
+  {id:'a-first',title:'My First Database App',template:'blank',level:'Guided',tutorialMode:'guided',capabilityLevel:1,requirements:{records:3,components:4,blocks:4}}
 ];
 
 function loadAssignments(){
@@ -240,6 +282,11 @@ const state = {
   assignments:CLOUD_MODE?[]:loadAssignments(),
   media:loadMediaStore(),
   testLogs:[],
+  testRecords:[],
+  testValues:{},
+  testVisibility:{},
+  testVariables:{},
+  testDisplayValues:{},
   authLoading:CLOUD_MODE,
   user:null,
   profile:null,
@@ -306,7 +353,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.18</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.21</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this Google account has not been invited as a teacher yet.</p>
     <div class="notice"><b>Ask your DataApp Studio administrator to invite this exact Google email address.</b><div class="uid-box">${escapeHtml(state.user.email||'')}</div></div>
     <p class="muted">Once the administrator has invited the address, click <b>Check again</b>. The teacher account will be activated automatically; no Firebase UID needs to be copied.</p>
@@ -316,7 +363,7 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.18 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.21 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -371,17 +418,20 @@ function appCard(project){
   const id=projectIdOf(project), published=project?.publish?.isPublished, task=project.assignmentId?assignmentTitle(project.assignmentId):'';
   const pages=project.pages?.length||1, records=project.records?.length||0, components=project.components?.length||0;
   return `<div class="card project-card app-library-card">
-    <div class="app-card-top"><div><div class="project-meta"><span class="tag ${published?'tag-good':''}">${published?'✓ Published':'Draft'}</span>${task?`<span class="tag">Class task</span>`:'<span class="tag">My app</span>'}</div><h3>${escapeHtml(project.name||'Untitled app')}</h3>${task?`<p class="app-task-name">${escapeHtml(task)}</p>`:''}</div><div class="mini-app-icon">${published?'📲':'📱'}</div></div>
+    <div class="app-card-top"><div><div class="project-meta"><span class="tag ${published?'tag-good':''}">${published?'✓ Published':'Draft'}</span>${task?`<span class="tag">Class task</span>`:'<span class="tag">My app</span>'}<span class="tag capability-tag">${escapeHtml(capabilityLabel(project.capabilityLevel||1))}</span></div><h3>${escapeHtml(project.name||'Untitled app')}</h3>${task?`<p class="app-task-name">${escapeHtml(task)}</p>`:''}</div><div class="mini-app-icon">${published?'📲':'📱'}</div></div>
     <p class="muted">${pages} page${pages===1?'':'s'} · ${records} record${records===1?'':'s'} · ${components} component${components===1?'':'s'}</p>
     <div class="progress"><span style="width:${projectProgressFor(project)}%"></span></div>
     <div class="app-card-actions"><button class="btn primary small" data-open-project="${escapeAttr(id)}">Open</button><button class="btn small" data-rename-project="${escapeAttr(id)}">Rename</button><button class="btn small" data-duplicate-project="${escapeAttr(id)}">Duplicate</button><button class="btn small danger-soft" data-delete-project="${escapeAttr(id)}">Delete</button></div>
   </div>`;
 }
 function projectProgressFor(project){
-  const hasEvent=(project.program||[]).some(b=>['event_open','event_click','event_list_click'].includes(b.type));
-  const connected=(project.program||[]).some(b=>b.type==='set_field');
-  const listReady=(project.components||[]).some(c=>c.type==='list'&&(c.listTitleField||c.listImageField));
-  const checks=[(project.records||[]).length>=3&&(project.fields||[]).length>=3,(project.components||[]).length>=3,(project.pages||[]).length>=2&&listReady,hasEvent,connected];
+  const capLevel=Math.max(1,Math.min(5,Number(project.capabilityLevel)||1)),program=project.program||[],components=project.components||[];
+  const hasEvent=program.some(b=>['event_open','event_click','event_list_click','event_change'].includes(b.type));let checks=[];
+  if(capLevel===1){const connected=program.some(b=>b.type==='set_field'),listReady=components.some(c=>c.type==='list'&&(c.listTitleField||c.listImageField));checks=[(project.records||[]).length>=3&&(project.fields||[]).length>=3,components.length>=3,(project.pages||[]).length>=2&&listReady,hasEvent,connected];}
+  else if(capLevel===2)checks=[components.length>=2,components.some(c=>interactiveComponentType(c.type)),hasEvent,programHasType(program,'if_component'),programHasType(program,['show_message','set_visible','set_from_component'])];
+  else if(capLevel===3)checks=[(project.fields||[]).length>=2,components.filter(c=>interactiveComponentType(c.type)).length>=2,components.some(c=>interactiveComponentType(c.type)&&c.dataField),hasEvent,programHasType(program,['add_record_form','update_record_form','delete_record'])];
+  else if(capLevel===4)checks=[components.length>=2,hasEvent,programHasType(program,['set_variable','change_variable']),programHasType(program,'set_from_variable'),program.length>=3];
+  else checks=[components.some(c=>interactiveComponentType(c.type)),hasEvent,programHasType(program,'api_request'),programHasType(program,'set_from_api'),programHasType(program,'if_api_success')];
   return Math.round(checks.filter(Boolean).length/checks.length*100);
 }
 
@@ -430,7 +480,7 @@ function teacherView(){
       <div class="card"><div class="muted">Shared Image Bank</div><h2 style="margin:5px 0">${state.media.shared.filter(x=>!x.locked).length}</h2><button class="btn small" data-action="manage-bank">Add images</button></div>
     </div>
     <div class="section-head"><div><h2 style="font-size:19px">Assignments</h2><p>These appear automatically on pupils' dashboards.</p></div></div>
-    <div class="cards" style="margin-bottom:16px">${state.assignments.length?state.assignments.map(a=>`<div class="card"><div class="tag">${escapeHtml(a.level||'Guided')}</div><h3>${escapeHtml(a.title)}</h3><p class="muted">${a.requirements?.records||1}+ records · ${a.requirements?.components||4}+ components · ${a.requirements?.blocks||4}+ blocks</p><button class="btn small" data-start-assignment="${escapeAttr(a.id)}">Preview task</button></div>`).join(''):'<div class="card"><div class="empty-note">No assignments yet. Click + New assignment.</div></div>'}</div>
+    <div class="cards" style="margin-bottom:16px">${state.assignments.length?state.assignments.map(a=>`<div class="card"><div class="project-meta"><span class="tag">${escapeHtml(a.level||'Guided')}</span><span class="tag capability-tag">${escapeHtml(capabilityLabel(a.capabilityLevel||1))}</span></div><h3>${escapeHtml(a.title)}</h3><p class="muted">${projectBrief(a.capabilityLevel||1).emoji} ${escapeHtml(projectBrief(a.capabilityLevel||1).title)} — ${escapeHtml(projectBrief(a.capabilityLevel||1).mission)}</p><p class="muted">${a.requirements?.records??1}+ records · ${a.requirements?.components??4}+ components · ${a.requirements?.blocks??4}+ blocks</p><button class="btn small" data-start-assignment="${escapeAttr(a.id)}">Preview task</button></div>`).join(''):'<div class="card"><div class="empty-note">No assignments yet. Click + New assignment.</div></div>'}</div>
     <div class="card"><div class="section-head"><div><h2 style="font-size:19px">Pupils & projects</h2><p>Real members and saved projects from Firestore.</p></div></div>
       <table class="class-table"><thead><tr><th>Pupil</th><th>Email</th><th>Apps</th><th>Latest project</th><th>Data</th><th>Design</th><th>Blocks</th><th>Block support</th><th></th></tr></thead><tbody>
       ${state.members.length?state.members.map(m=>{const p=projectByUid.get(m.uid||m.id);const mode=m.blockSupportMode==='auto'?'auto':'manual';return `<tr><td><button class="pupil-link" data-view-pupil="${escapeAttr(m.uid||m.id)}">${escapeHtml(m.displayName||'Pupil')}</button></td><td>${escapeHtml(m.email||'')}</td><td>${projectCountByUid.get(m.uid||m.id)||0}</td><td>${escapeHtml(p?.name||'Not started')}</td><td>${p?p.records?.length||0:'—'}</td><td>${p?p.components?.length||0:'—'}</td><td>${p?p.program?.length||0:'—'}</td><td><select class="member-support-select" data-block-support="${escapeAttr(m.uid||m.id)}"><option value="manual" ${mode==='manual'?'selected':''}>Tutorial — pupil builds blocks</option><option value="auto" ${mode==='auto'?'selected':''}>Auto-add support blocks</option></select></td><td><button class="btn small" data-view-pupil="${escapeAttr(m.uid||m.id)}">View apps</button> <button class="btn small" data-remove-member="${escapeAttr(m.uid||m.id)}">Remove</button></td></tr>`}).join(''):'<tr><td colspan="9"><div class="empty-note">No pupils have joined yet. Give them class code <b>'+escapeHtml(cls?.joinCode||'')+'</b>.</div></td></tr>'}
@@ -451,7 +501,7 @@ function teacherPupilAppsView(){
 }
 function teacherAppCard(project){
   const id=projectIdOf(project),pages=project.pages?.length||1,records=project.records?.length||0,blocks=project.program?.length||0;
-  return `<div class="card project-card"><div class="project-meta"><span class="tag ${project?.publish?.isPublished?'tag-good':''}">${project?.publish?.isPublished?'✓ Published':'Draft'}</span>${project.assignmentId?'<span class="tag">Class task</span>':'<span class="tag">Own app</span>'}</div><h3>${escapeHtml(project.name||'Untitled app')}</h3><p class="muted">${pages} page${pages===1?'':'s'} · ${records} record${records===1?'':'s'} · ${blocks} block${blocks===1?'':'s'}</p><button class="btn primary small" data-teacher-open-project="${escapeAttr(id)}">Open read-only</button></div>`;
+  return `<div class="card project-card"><div class="project-meta"><span class="tag ${project?.publish?.isPublished?'tag-good':''}">${project?.publish?.isPublished?'✓ Published':'Draft'}</span>${project.assignmentId?'<span class="tag">Class task</span>':'<span class="tag">Own app</span>'}<span class="tag capability-tag">${escapeHtml(capabilityLabel(project.capabilityLevel||1))}</span></div><h3>${escapeHtml(project.name||'Untitled app')}</h3><p class="muted">${pages} page${pages===1?'':'s'} · ${records} record${records===1?'':'s'} · ${blocks} block${blocks===1?'':'s'}</p><button class="btn primary small" data-teacher-open-project="${escapeAttr(id)}">Open read-only</button></div>`;
 }
 function openTeacherPupil(uid){
   const member=state.members.find(m=>(m.uid||m.id)===uid);state.teacherPupilUid=uid;state.teacherPupilName=member?.displayName||'Pupil';state.view='teacher-pupil';render();
@@ -463,63 +513,91 @@ function openTeacherProject(projectId){
 
 function builderView(){
   const inspect=state.teacherInspectActive&&state.role==='teacher';
-  const tabs=inspect?['data','design','blocks','test']:['data','design','blocks','test','publish'];
-  const labels={data:'1. 🗃 DATA',design:'2. 🎨 DESIGN',blocks:'3. 🧩 BLOCKS',test:'4. ▶ TEST',publish:'5. 🚀 PUBLISH'};
+  const connected=projectCapabilityLevel()>=5;
+  const tabs=connected?(inspect?['data','design','api','blocks','test']:['data','design','api','blocks','test','publish']):(inspect?['data','design','blocks','test']:['data','design','blocks','test','publish']);
+  const labels=connected?{data:'1. 🗃 DATA',design:'2. 🎨 DESIGN',api:'3. 🌐 CONNECT',blocks:'4. 🧩 BLOCKS',test:'5. ▶ TEST',publish:'6. 🚀 PUBLISH'}:{data:'1. 🗃 DATA',design:'2. 🎨 DESIGN',blocks:'3. 🧩 BLOCKS',test:'4. ▶ TEST',publish:'5. 🚀 PUBLISH'};
   return `<div class="builder ${inspect?'teacher-inspection':''}">
-<div class="builder-head"><button class="btn small" data-action="back-pupil">← ${inspect?'Pupil apps':'Dashboard'}</button><div class="project-title">${escapeHtml(state.project.name)}</div>${inspect?`<span class="pill">Read-only teacher view</span>`:`<span class="mini-progress">${projectProgress()}% ready</span><span class="save-state">${CLOUD_MODE?'Cloud project':'Saved locally'}</span><button class="btn small tutorial-toggle" data-action="toggle-tutorial">${state.project.tutorialEnabled===false?'Show tutorial':'Hide tutorial'}</button><button class="btn small" data-action="reset">Clear project</button>`}</div>
+<div class="builder-head"><button class="btn small" data-action="back-pupil">← ${inspect?'Pupil apps':'Dashboard'}</button><div class="project-title">${escapeHtml(state.project.name)}</div><span class="pill capability-pill">${escapeHtml(capabilityLabel(projectCapabilityLevel()))}</span>${inspect?`<span class="pill">Read-only teacher view</span>`:`<span class="mini-progress">${projectProgress()}% ready</span><span class="save-state">${CLOUD_MODE?'Cloud project':'Saved locally'}</span><button class="btn small tutorial-toggle" data-action="toggle-tutorial">${state.project.tutorialEnabled===false?'Show tutorial':'Hide tutorial'}</button><button class="btn small" data-action="reset">Clear project</button>`}</div>
 <div class="step-tabs">${tabs.map(t=>`<button class="step-tab ${state.tab===t?'active':''}" data-tab="${t}">${labels[t]}</button>`).join('')}</div>
-${inspect?`<div class="notice teacher-readonly-note"><b>Teacher view:</b> You can inspect Data, Design, Blocks and run Test. Nothing here saves changes to the pupil's project.</div>`:(state.project.tutorialEnabled===false?'':tutorialPanel())}
-<div class="builder-body">${state.tab==='data'?dataView():state.tab==='design'?designView():state.tab==='blocks'?blocksView():state.tab==='test'?testView():publishView()}</div>
+${inspect?`<div class="notice teacher-readonly-note"><b>Teacher view:</b> You can inspect this pupil's project and run Test. Nothing here saves changes to the pupil's project.</div>`:(state.project.tutorialEnabled===false?projectBriefPanel():tutorialPanel())}
+<div class="builder-body">${state.tab==='data'?dataView():state.tab==='design'?designView():state.tab==='api'?apiView():state.tab==='blocks'?blocksView():state.tab==='test'?testView():publishView()}</div>
 </div>`}
 
 function tutorialSteps(){
   const fields=state.project.fields||[], records=state.project.records||[], comps=state.project.components||[], program=state.project.program||[];
-  const pages=state.project.pages||[];
-  const lists=comps.filter(c=>c.type==='list');
-  const configuredList=lists.find(c=>(!c.listLayout?.includes('image')||c.listImageField)&&(!c.listLayout?.includes('title')||c.listTitleField)&&(!c.listLayout?.includes('subtitle')||c.listSubtitleField));
-  const hasSecondPage=pages.length>=2;
-  const nonHomePages=new Set(pages.slice(1).map(p=>p.id));
-  const detailComponents=comps.filter(c=>nonHomePages.has(c.pageId)&&['label','image','input'].includes(c.type));
-  const hasDetailDesign=detailComponents.length>=1;
-  const detailConnected=detailComponents.length>0&&detailComponents.some(c=>program.some(b=>b.type==='set_field'&&b.target===c.id));
-  const listEvent=program.some(b=>b.type==='event_list_click');
-  const navBlock=program.some(b=>b.type==='navigate_page'&&nonHomePages.has(b.page));
-  const assisted=autoBlocksEnabled();
-  return [
+  const pages=state.project.pages||[],capLevel=projectCapabilityLevel(),assisted=autoBlocksEnabled();
+  const commonStart=[
     {tab:'data',title:'Name your app and database',done:state.project.name!=='My New App'&&state.project.tableName!=='MyData',
-      text:'Choose your own app idea. Give the app a name, then name the database table that will hold its information.',
-      tip:'Examples: Songs, Films, Players, Recipes, Animals or Places.'},
-    {tab:'data',title:'Create your fields',done:fields.length>=3,
-      text:'Create at least three database fields. Think about what you want each item in your list and details page to show.',
-      tip:'A useful list often has an ID, a title/name, a subtitle/category and an image field.'},
-    {tab:'data',title:'Add your records',done:records.length>=3,
-      text:'Add at least three different records. These rows will become the items in your app list.',
-      tip:'Use different-looking data so you can tell whether the selected record is changing correctly.'},
-    {tab:'design',title:'Build a scrollable list on Page 1',done:!!configuredList,
-      text:'Add a Database List. Choose its row layout, then choose which database fields supply the image, title and subtitle.',
-      tip:'The list itself is data-bound in Design. Programming decides what happens when somebody taps a row.'},
-    {tab:'design',title:'Create a second page',done:hasSecondPage,
-      text:'Click + Add page and name it something like Details. You only build this page once.',
-      tip:'The same Details page is reused for every database row, so an app with two designed pages can feel like it has dozens.'},
-    {tab:'design',title:'Design the reusable Details page',done:hasDetailDesign,
-      text:'Add the placeholders you need on the second page: headings, labels, images or other components.',
-      tip:'Do not make one page per record. These placeholders will be filled from whichever list row the user selects.'},
-    {tab:assisted?'design':'blocks',title:'Connect the Details placeholders to the selected record',done:detailConnected,
-      text:assisted?'Your teacher has enabled Auto-add support. You may use Auto-connect Data on a placeholder, then inspect the Blockly it creates.':'Open Blocks. Use “when Details opens” and Screen blocks to set each placeholder from a field in the selected record.',
-      tip:assisted?'Auto-add is support, not magic: open Blocks and read what it generated.':'For example: WHEN Details opens → SET TeamName TO Team Name FROM selected record.'},
-    {tab:assisted?'design':'blocks',title:'Program the list tap',done:listEvent&&navBlock,
-      text:assisted?'Your teacher has enabled Auto-add support, so choosing a destination page on the List can create the starter Blockly.':'Build it yourself in Blockly: Events → “when an item in List is tapped”, then Navigation → “go to Details”.',
-      tip:'The tapped row automatically becomes the selected record before the Details page opens.'},
-    {tab:'test',title:'Test several different records',done:state.tutorialTested===true,
-      text:'Run the app, scroll the list, tap different rows and check that the same Details page fills with different data each time.',
-      tip:'Try the first, middle and last row. Then add a Back button and program it with Navigation → go back.'}
+      text:'Choose your own app idea. Give the app a name, then name its database table.',
+      tip:'Use a name that tells somebody what your app actually does.'}
+  ];
+  if(capLevel===1){
+    const lists=comps.filter(c=>c.type==='list');
+    const configuredList=lists.find(c=>(!c.listLayout?.includes('image')||c.listImageField)&&(!c.listLayout?.includes('title')||c.listTitleField)&&(!c.listLayout?.includes('subtitle')||c.listSubtitleField));
+    const hasSecondPage=pages.length>=2,nonHomePages=new Set(pages.slice(1).map(p=>p.id));
+    const detailComponents=comps.filter(c=>nonHomePages.has(c.pageId)&&['label','image','input'].includes(c.type));
+    const hasDetailDesign=detailComponents.length>=1,detailConnected=detailComponents.length>0&&detailComponents.some(c=>program.some(b=>b.type==='set_field'&&b.target===c.id));
+    const listEvent=program.some(b=>b.type==='event_list_click'),navBlock=program.some(b=>b.type==='navigate_page'&&nonHomePages.has(b.page));
+    return [...commonStart,
+      {tab:'data',title:'Create your fields',done:fields.length>=3,text:'Create at least three database fields. Think about what you want each item in your list and details page to show.',tip:'A useful list often has a title/name, a category and an image field.'},
+      {tab:'data',title:'Add your records',done:records.length>=3,text:'Add at least three different records. These rows will become the items in your app list.',tip:'Use different-looking data so you can tell whether the selected record changes correctly.'},
+      {tab:'design',title:'Build a scrollable list on Page 1',done:!!configuredList,text:'Add a Database List. Choose its row layout and which database fields supply the image, title and subtitle.',tip:'The list is data-bound in Design; Blocks decide what happens when somebody taps it.'},
+      {tab:'design',title:'Create a second page',done:hasSecondPage,text:'Click + Add page and name it something like Details. You only build this page once.',tip:'One reusable Details page works for every database record.'},
+      {tab:'design',title:'Design the reusable Details page',done:hasDetailDesign,text:'Add the placeholders you need on the second page: headings, labels, images or a scrollable text box.',tip:'Do not make one page per record.'},
+      {tab:assisted?'design':'blocks',title:'Connect the Details placeholders',done:detailConnected,text:assisted?'Use Auto-connect Data on a placeholder, then inspect the Blockly it creates.':'Use “when Details opens” and Screen blocks to set each placeholder from the selected record.',tip:'The list tap chooses the selected record.'},
+      {tab:assisted?'design':'blocks',title:'Program the list tap',done:listEvent&&navBlock,text:assisted?'Choosing a destination page on the List can create the starter Blockly.':'Use Events → “when an item in List is tapped”, then Navigation → “go to Details”.',tip:'The tapped row automatically becomes the selected record.'},
+      {tab:'test',title:'Test several different records',done:state.tutorialTested===true,text:'Run the app, tap different rows and check the same Details page fills with different data.',tip:'Then add a Back button and program Navigation → go back.'}
+    ];
+  }
+  if(capLevel===2){
+    const interactive=comps.filter(c=>interactiveComponentType(c.type)),hasButton=comps.some(c=>c.type==='button');
+    const hasIf=programHasType(program,'if_component'),hasResponse=programHasType(program,['show_message','set_visible','set_from_component']);
+    return [...commonStart,
+      {tab:'design',title:'Build the screen first',done:comps.length>=2,text:'Add the labels, images or buttons your interactive app needs.',tip:'Keep the first screen simple enough that a user immediately knows what to do.'},
+      {tab:'design',title:'Add an interactive control',done:interactive.length>=1,text:'Try a Text Input, Number Input, Dropdown, Switch or Slider.',tip:'These controls are unlocked in Level 2 but are hidden from Level 1 projects.'},
+      {tab:'design',title:'Add an action button',done:hasButton,text:'Add a button the user can press after entering or choosing something.',tip:'Examples: Check answer, Show result, Recommend, Calculate or Continue.'},
+      {tab:'blocks',title:'Make a decision with IF / ELSE',done:hasIf,text:'Open Logic and build an IF / ELSE block using the value of one of your interactive controls.',tip:'Example: IF RatingSlider ≥ 8 THEN show a recommendation ELSE show another message.'},
+      {tab:'blocks',title:'Give the user a response',done:hasResponse,text:'Use a message, show/hide, or set a text component to the value entered by the user.',tip:'Combine these inside the IF and ELSE sections.'},
+      {tab:'test',title:'Try both outcomes',done:state.tutorialTested===true,text:'Run the app and deliberately test values that make the IF condition true and false.',tip:'A good programmer tests more than the happy path.'}
+    ];
+  }
+  if(capLevel===3){
+    const mapped=comps.some(c=>interactiveComponentType(c.type)&&c.dataField),write=programHasType(program,['add_record_form','update_record_form','delete_record']);
+    const interactive=comps.filter(c=>interactiveComponentType(c.type));
+    return [...commonStart,
+      {tab:'data',title:'Create the fields your form will save',done:fields.length>=2,text:'Create the database fields the user will be able to add or edit.',tip:'Choose sensible field types — e.g. Number for price or Yes/No for a switch.'},
+      {tab:'design',title:'Build a data-entry form',done:interactive.length>=2,text:'Add at least two interactive controls for the user to enter information.',tip:'Text Input, Number Input, Dropdown, Switch and Slider can all feed the database.'},
+      {tab:'design',title:'Map inputs to database fields',done:mapped,text:'Select each input and choose its “Database field to save”.',tip:'This mapping means one simple Save block can collect the whole form.'},
+      {tab:'design',title:'Add Save / Update / Delete buttons',done:comps.filter(c=>c.type==='button').length>=1,text:'Add the button or buttons your app needs to change its data.',tip:'You do not need all three actions in every project.'},
+      {tab:'blocks',title:'Change the database',done:write,text:'Use Database blocks to add a new record, update the selected record or delete it.',tip:'Published apps keep these changes on that user’s device.'},
+      {tab:'test',title:'Test data changing safely',done:state.tutorialTested===true,text:'Run the app and check new or edited records appear correctly. Test delete carefully too.',tip:'Restart Test to return to the original project data — testing never edits your saved database.'}
+    ];
+  }
+  if(capLevel===4){
+    const hasVar=programHasType(program,['set_variable','change_variable','set_from_variable']);
+    return [...commonStart,
+      {tab:'design',title:'Create something that needs a value to remember',done:comps.length>=2,text:'Build a screen for a score, counter, basket total or another value that changes while the app runs.',tip:'Variables are useful when the value is not simply one database field.'},
+      {tab:'blocks',title:'Create or change a variable',done:hasVar,text:'Open Variables and set a variable, change it by an amount, then display it in a label or text box.',tip:'Try a variable called score, total or count.'},
+      {tab:'blocks',title:'Combine variables with your earlier skills',done:hasVar&&program.some(b=>b.type==='event_click'),text:'Change the variable inside a button event. You can still use Level 2 IF / ELSE and Level 3 database tools.',tip:'Each level keeps the earlier tools and adds a small new layer.'},
+      {tab:'test',title:'Test the value changing more than once',done:state.tutorialTested===true,text:'Run the app and press your controls repeatedly. Check the variable changes exactly as expected.',tip:'Restart resets runtime variables.'}
+    ];
+  }
+  const hasApiRequest=programHasType(program,'api_request'),hasApiOutput=programHasType(program,'set_from_api'),hasApiError=programHasType(program,'if_api_success');
+  return [...commonStart,
+    {tab:'api',title:'Choose and test a live API',done:state.project.apiTested===true,text:'Open Connect, choose Live Weather, Book Search or Pokédex, then try a real request in the API tester.',tip:'Notice the JSON field names — your app will use those same result fields.'},
+    {tab:'design',title:'Build a search screen',done:comps.some(c=>c.type==='textInput')&&comps.some(c=>c.type==='button'),text:'Add a Text Input for the search, a button to send it, and labels or an image for the result.',tip:'The API does the lookup; your screen decides how the result feels to the user.'},
+    {tab:'blocks',title:'Send the API request',done:hasApiRequest,text:'In Web / API, use “ask the selected API using …” inside your search button event.',tip:'The request uses whatever the user typed into your input.'},
+    {tab:'blocks',title:'Put live results on screen',done:hasApiOutput,text:'Add “set … to API result …” blocks for at least three useful values.',tip:'Image URL results can be sent straight to an Image component.'},
+    {tab:'blocks',title:'Handle success and failure',done:hasApiError,text:'Use “if last API request worked” so a failed search gives the user a helpful response.',tip:'Real internet services can fail — good apps plan for it.'},
+    {tab:'test',title:'Test a real search',done:state.tutorialTested===true,text:'Run the app with a valid search, then deliberately try something invalid.',tip:'You are now testing a real request → JSON → interface flow.'}
   ];
 }
+
 function tutorialPanel(){
   const steps=tutorialSteps(), completed=steps.filter(x=>x.done).length;
   const current=steps.find(x=>!x.done)||steps[steps.length-1];
   const pct=Math.round(completed/steps.length*100);
-  return `<section class="tutorial-panel">
+  return `${projectBriefPanel()}<section class="tutorial-panel">
     <div class="tutorial-top"><div><span class="tutorial-kicker">🧭 GUIDED TUTORIAL</span><h3>${completed===steps.length?'You built it yourself 🎉':`Step ${Math.min(completed+1,steps.length)} of ${steps.length}: ${escapeHtml(current.title)}`}</h3></div><strong>${completed}/${steps.length}</strong></div>
     <div class="tutorial-progress"><span style="width:${pct}%"></span></div>
     ${completed===steps.length?`<p>You now have a database, interface and program that you created from a blank canvas. You can keep improving it or move to Publish.</p>`:
@@ -567,6 +645,43 @@ function fieldOptionsHtml(selected='',type='any',blank='Choose field…'){
 function pageOptionsHtml(selected='',exclude=''){
   return `<option value="">Choose page…</option>`+state.project.pages.filter(p=>p.id!==exclude).map(p=>`<option value="${p.id}" ${p.id===selected?'selected':''}>${escapeHtml(p.name)}</option>`).join('');
 }
+
+function componentToolsForLevel(level=projectCapabilityLevel()){
+  const tools=[
+    ['label','🔤','Text / Label',1],
+    ['image','🖼️','Image',1],
+    ['button','🔘','Button',1],
+    ['input','📝','Scrollable text box',1],
+    ['list','☷','Database List',1],
+    ['textInput','⌨️','Text Input',2],
+    ['numberInput','🔢','Number Input',2],
+    ['dropdown','▾','Dropdown',2],
+    ['switch','⏻','Switch / Toggle',2],
+    ['slider','↔','Slider',2]
+  ];
+  return tools.filter(x=>x[3]<=level);
+}
+function formFieldOptionsHtml(selected,type){
+  const compatible=state.project.fields.filter(f=>{
+    if(type==='numberInput'||type==='slider')return ['number','rating'].includes(f.type);
+    if(type==='switch')return f.type==='boolean';
+    return !['image','imageUrl'].includes(f.type);
+  });
+  return `<option value="">Not connected</option>${compatible.map(f=>`<option value="${f.id}" ${f.id===selected?'selected':''}>${escapeHtml(f.name)} · ${escapeHtml(fieldTypeLabel(f.type))}</option>`).join('')}`;
+}
+function formMappingMarkup(c){
+  if(projectCapabilityLevel()<3)return '';
+  return `<div class="prop-group"><label>Database field to save</label><select data-prop="dataField">${formFieldOptionsHtml(c.dataField,c.type)}</select><small class="prop-help">Level 3 save/update blocks use this mapping.</small></div>`;
+}
+function interactivePropertiesMarkup(c){
+  if(!interactiveComponentType(c.type))return '';
+  if(c.type==='textInput')return `<div class="prop-section-title">Interactive input</div><div class="prop-group"><label>Placeholder</label><input data-prop="placeholder" value="${escapeAttr(c.placeholder||'Type here...')}"></div><div class="prop-group"><label>Starting value</label><input data-prop="defaultValue" value="${escapeAttr(c.defaultValue??'')}"></div>${formMappingMarkup(c)}`;
+  if(c.type==='numberInput')return `<div class="prop-section-title">Interactive input</div><div class="prop-group"><label>Placeholder</label><input data-prop="placeholder" value="${escapeAttr(c.placeholder||'Enter a number')}"></div><div class="prop-group"><label>Starting value</label><input data-prop="defaultValue" type="number" value="${escapeAttr(c.defaultValue??'')}"></div>${formMappingMarkup(c)}`;
+  if(c.type==='dropdown')return `<div class="prop-section-title">Interactive input</div><div class="prop-group"><label>Options — one per line</label><textarea data-prop="options" rows="5">${escapeHtml(c.options||'Option 1\nOption 2\nOption 3')}</textarea></div><div class="prop-group"><label>Starting value</label><input data-prop="defaultValue" value="${escapeAttr(c.defaultValue??'')}"></div>${formMappingMarkup(c)}`;
+  if(c.type==='switch')return `<div class="prop-section-title">Interactive input</div><div class="prop-group"><label>Label</label><input data-prop="text" value="${escapeAttr(c.text||'On / Off')}"></div><label class="checkbox-row"><input data-component-toggle="defaultValue" type="checkbox" ${c.defaultValue===true?'checked':''}><span>On when app starts</span></label>${formMappingMarkup(c)}`;
+  if(c.type==='slider')return `<div class="prop-section-title">Interactive input</div><div class="prop-grid-three"><div><label>Min</label><input data-prop="min" type="number" value="${Number(c.min??0)}"></div><div><label>Max</label><input data-prop="max" type="number" value="${Number(c.max??100)}"></div><div><label>Step</label><input data-prop="step" type="number" min="0.01" value="${Number(c.step??1)}"></div></div><div class="prop-group"><label>Starting value</label><input data-prop="defaultValue" type="number" value="${Number(c.defaultValue??50)}"></div>${formMappingMarkup(c)}`;
+  return '';
+}
 function designView(){
   const pg=currentPage();
   return `<div class="section-head"><div><h2>Design your app</h2><p>Create more than one page, then place components on the selected page.</p></div><button class="btn good" data-tab="test">▶ Test app</button></div>
@@ -575,8 +690,9 @@ function designView(){
     <div class="page-actions"><button class="btn small" data-action="rename-page">Rename</button><button class="btn small" data-action="add-page">+ Add page</button>${state.project.pages.length>1?'<button class="btn small danger-text" data-action="delete-page">Delete page</button>':''}</div>
   </div>
   <div class="notice master-detail-note"><b>List → Details pattern:</b> Put a List on Home and design one reusable Details page. ${autoBlocksEnabled()?'Your teacher has enabled Auto-add support, so Design shortcuts can create starter Blockly for you.':'Programming stays in Blocks: you decide what happens when the user taps a row.'} The tapped row becomes the <b>selected record</b>.</div>
+  <div class="capability-banner"><div><b>${escapeHtml(capabilityLabel(projectCapabilityLevel()))}</b><span>${escapeHtml(capabilityInfo(projectCapabilityLevel()).description)}</span></div>${projectCapabilityLevel()===1?'<span class="tag">Project 1 stays simple</span>':''}</div>
   <div class="design-grid">
-  <aside class="toolbox"><h3>Components</h3>${[['label','🔤','Text / Label'],['image','🖼️','Image'],['button','🔘','Button'],['input','📝','Scrollable text box'],['list','☷','Database List']].map(c=>`<button class="component-btn" data-add-component="${c[0]}"><span>${c[1]}</span><span>${c[2]}</span></button>`).join('')}<div class="empty-note" style="margin-top:14px"><b>Selected page:</b><br>${escapeHtml(pg?.name||'Page')}</div></aside>
+  <aside class="toolbox"><div class="toolbox-level"><span class="tag capability-tag">${escapeHtml(capabilityLabel(projectCapabilityLevel()))}</span><small>${escapeHtml(capabilityInfo(projectCapabilityLevel()).short)}</small></div><h3>Components</h3>${componentToolsForLevel().map(c=>`<button class="component-btn" data-add-component="${c[0]}"><span>${c[1]}</span><span>${c[2]}</span></button>`).join('')}${projectCapabilityLevel()<4?`<div class="locked-tools"><b>🔒 More tools later</b><span>Your teacher unlocks the next project level when you need it.</span></div>`:''}<div class="empty-note" style="margin-top:14px"><b>Selected page:</b><br>${escapeHtml(pg?.name||'Page')}</div></aside>
   <section class="workspace-panel"><div class="device-wrap"><div class="device-switch">${[['phone','Phone'],['large','Large phone'],['tablet','Tablet']].map(d=>`<button data-device="${d[0]}" class="${state.device===d[0]?'active':''}">${d[1]}</button>`).join('')}</div>${phoneMarkup('design')}</div></section>
   <aside class="properties">${propertiesMarkup()}</aside>
   </div>`;
@@ -587,14 +703,17 @@ function propertiesMarkup(){
   if(!c){const pg=currentPage();return `<h3>${escapeHtml(pg?.name||'Page')}</h3><div class="prop-group"><label>Page background</label><div class="colour-row"><input data-page-prop="backgroundColor" type="color" value="${escapeAttr(pg?.backgroundColor||'#ffffff')}"><span>${escapeHtml(pg?.backgroundColor||'#ffffff')}</span></div></div><div class="empty-note">Click a component on ${escapeHtml(pg?.name||'this page')} to change its properties.</div>`;}
   return `<h3>${escapeHtml(c.name)}</h3>
   <div class="prop-group"><label>Name</label><input data-prop="name" value="${escapeAttr(c.name)}"></div>
-  ${c.type!=='image'&&c.type!=='list'?`<div class="prop-group"><label>${c.type==='input'?'Text box content':'Text'}</label>${c.type==='input'?`<textarea data-prop="text" rows="5">${escapeHtml(c.text||'')}</textarea>`:`<input data-prop="text" value="${escapeAttr(c.text||'')}">`}</div>`:''}
-  ${['label','button','input'].includes(c.type)?`<div class="prop-group colour-grid"><label>Text colour</label><input data-prop="textColor" type="color" value="${escapeAttr(c.textColor||'#172033')}"><label>Background colour</label><input data-prop="backgroundColor" type="color" value="${escapeAttr(c.backgroundColor||'#ffffff')}"></div>`:''}
+  ${['label','button','input'].includes(c.type)?`<div class="prop-group"><label>${c.type==='input'?'Text box content':'Text'}</label>${c.type==='input'?`<textarea data-prop="text" rows="5">${escapeHtml(c.text||'')}</textarea>`:`<input data-prop="text" value="${escapeAttr(c.text||'')}">`}</div>`:''}
+  ${['label','button','input','textInput','numberInput','dropdown','switch','slider'].includes(c.type)?`<div class="prop-group colour-grid"><label>Text colour</label><input data-prop="textColor" type="color" value="${escapeAttr(c.textColor||'#172033')}"><label>Background colour</label><input data-prop="backgroundColor" type="color" value="${escapeAttr(c.backgroundColor||'#ffffff')}"></div>`:''}
   ${c.type==='image'?`<div class="prop-group"><label>Image</label><div class="property-image-preview"><img src="${escapeAttr(resolveImage(c.src))}" alt=""></div><button class="btn" style="width:100%" data-action="choose-component-image">🖼 Choose image</button></div>`:''}
+  ${interactivePropertiesMarkup(c)}
   ${c.type==='label'?`<div class="prop-group"><label>Font size</label><input data-prop="fontSize" type="number" min="10" max="48" value="${c.fontSize||16}"></div><div class="prop-group"><label>Alignment</label><select data-prop="align"><option ${c.align==='left'?'selected':''}>left</option><option ${c.align==='center'?'selected':''}>center</option><option ${c.align==='right'?'selected':''}>right</option></select></div>`:''}
   ${c.type==='list'?listPropertiesMarkup(c):''}
+  ${projectCapabilityLevel()>=2?`<label class="checkbox-row"><input data-component-toggle="visible" type="checkbox" ${c.visible!==false?'checked':''}><span>Visible when app starts</span></label>`:''}
   <div class="prop-group"><label>Width</label><input data-prop="w" type="number" value="${c.w}"></div><div class="prop-group"><label>Height</label><input data-prop="h" type="number" value="${c.h}"></div>
   ${['label','image','input'].includes(c.type)?(autoBlocksEnabled()?`<button class="btn connect" style="width:100%;margin-bottom:8px" data-action="connect-data">✨ Auto-connect Data</button><div class="connection-note">${connectionsFor(c.id)}</div>`:`<button class="btn connect" style="width:100%;margin-bottom:8px" data-program-component="${escapeAttr(c.id)}" data-program-kind="data">🧩 Program data in Blocks</button><div class="connection-note">${connectionsFor(c.id)} You add the Blockly yourself.</div>`):''}
   ${c.type==='button'?`<button class="btn connect" style="width:100%;margin-bottom:8px" data-program-component="${escapeAttr(c.id)}" data-program-kind="button">🧩 Tell ${escapeHtml(c.name)} what to do</button><div class="connection-note">Buttons only act when you program a <b>when ${escapeHtml(c.name)} clicked</b> event in Blocks.</div>`:''}
+  ${interactiveComponentType(c.type)?`<button class="btn connect" style="width:100%;margin-bottom:8px" data-program-component="${escapeAttr(c.id)}" data-program-kind="interactive">🧩 Program ${escapeHtml(c.name)}</button><div class="connection-note">Use its value in Logic, or react when it changes.</div>`:''}
   <button class="btn small" style="width:100%;color:var(--danger)" data-action="delete-component">Delete component</button>`
 }
 function listPropertiesMarkup(c){
@@ -623,7 +742,7 @@ function phoneMarkup(mode='design'){
   const pg=state.project.pages.find(p=>p.id===pageId);return `<div class="phone device-${state.device}"><div class="screen" style="background:${escapeAttr(pg?.backgroundColor||'#ffffff')}" data-phone-mode="${mode}" data-page-id="${escapeAttr(pageId)}">${componentsOnPage(pageId).map(c=>componentMarkup(c,mode)).join('')}</div></div>`;
 }
 function listRowsMarkup(c,mode){
-  const rows=state.project.records||[];
+  const rows=mode==='test'?(state.testRecords||[]):(state.project.records||[]);
   if(!rows.length)return `<div class="list-empty">No database records yet</div>`;
   return rows.map((r,i)=>{
     const image=c.listImageField?resolveImage(r[c.listImageField]):'';
@@ -637,16 +756,27 @@ function listRowsMarkup(c,mode){
     </div>`;
   }).join('');
 }
+function runtimeComponentValue(c,mode){
+  if(mode==='test'&&Object.prototype.hasOwnProperty.call(state.testValues,c.id))return state.testValues[c.id];
+  return c.defaultValue??'';
+}
+function dropdownOptions(c){return String(c.options||'Option 1\nOption 2\nOption 3').split(/\r?\n|,/).map(x=>x.trim()).filter(Boolean).slice(0,30);}
 function componentMarkup(c,mode){
   const sel=mode==='design'&&state.selectedComponent===c.id?'selected':'';
-  const style=`left:${c.x}px;top:${c.y}px;width:${c.w}px;height:${c.h}px;`;
+  const hidden=mode==='test'&&state.testVisibility[c.id]===false;
+  const style=`left:${c.x}px;top:${c.y}px;width:${c.w}px;height:${c.h}px;${hidden?'display:none;':''}`;
   const attrs=mode==='design'?`data-component="${c.id}"`:`data-test-component="${c.id}"`;
   const textColor=escapeAttr(c.textColor||'#172033'),bg=escapeAttr(c.backgroundColor||'transparent');
   let inner='';
-  if(c.type==='label') inner=`<div class="label" style="font-size:${c.fontSize||16}px;text-align:${c.align||'left'};color:${textColor};background:${bg}">${escapeHtml(c.text||'Label')}</div>`;
-  if(c.type==='button') inner=`<button style="background:${escapeAttr(c.backgroundColor||'#5b5ce2')};color:${escapeAttr(c.textColor||'#ffffff')}">${escapeHtml(c.text||'Button')}</button>`;
-  if(c.type==='image') inner=`<img src="${escapeAttr(resolveImage(c.src))}" alt="">`;
-  if(c.type==='input') inner=`<div class="text-box-component" style="background:${escapeAttr(c.backgroundColor||'#ffffff')};color:${textColor}">${escapeHtml(c.text||'Long text appears here')}</div>`;
+  if(c.type==='label'){const value=mode==='test'&&Object.prototype.hasOwnProperty.call(state.testDisplayValues,c.id)?state.testDisplayValues[c.id]:(c.text||'Label');inner=`<div class="label" style="font-size:${c.fontSize||16}px;text-align:${c.align||'left'};color:${textColor};background:${bg}">${escapeHtml(value)}</div>`;}
+  if(c.type==='button'){const value=mode==='test'&&Object.prototype.hasOwnProperty.call(state.testDisplayValues,c.id)?state.testDisplayValues[c.id]:(c.text||'Button');inner=`<button style="background:${escapeAttr(c.backgroundColor||'#5b5ce2')};color:${escapeAttr(c.textColor||'#ffffff')}">${escapeHtml(value)}</button>`;}
+  if(c.type==='image'){const value=mode==='test'&&Object.prototype.hasOwnProperty.call(state.testDisplayValues,c.id)?state.testDisplayValues[c.id]:c.src;inner=`<img src="${escapeAttr(resolveImage(value))}" alt="">`;}
+  if(c.type==='input'){const value=mode==='test'&&Object.prototype.hasOwnProperty.call(state.testDisplayValues,c.id)?state.testDisplayValues[c.id]:(c.text||'Long text appears here');inner=`<div class="text-box-component" style="background:${escapeAttr(c.backgroundColor||'#ffffff')};color:${textColor}">${escapeHtml(value)}</div>`;}
+  if(c.type==='textInput') inner=`<input class="interactive-input" data-interactive-value type="text" placeholder="${escapeAttr(c.placeholder||'Type here...')}" value="${escapeAttr(runtimeComponentValue(c,mode))}" style="background:${bg};color:${textColor}" ${mode==='design'?'readonly':''}>`;
+  if(c.type==='numberInput') inner=`<input class="interactive-input" data-interactive-value type="number" placeholder="${escapeAttr(c.placeholder||'Enter a number')}" value="${escapeAttr(runtimeComponentValue(c,mode))}" style="background:${bg};color:${textColor}" ${mode==='design'?'readonly':''}>`;
+  if(c.type==='dropdown'){const value=String(runtimeComponentValue(c,mode)??''),opts=dropdownOptions(c);inner=`<select class="interactive-input" data-interactive-value style="background:${bg};color:${textColor}" ${mode==='design'?'disabled':''}>${opts.map((o,i)=>`<option value="${escapeAttr(o)}" ${(value===o||(!value&&i===0))?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select>`;}
+  if(c.type==='switch'){const checked=runtimeComponentValue(c,mode)===true||String(runtimeComponentValue(c,mode))==='true';inner=`<label class="switch-component" style="background:${bg};color:${textColor}"><input data-interactive-value type="checkbox" ${checked?'checked':''} ${mode==='design'?'disabled':''}><span class="switch-track"><span></span></span><b>${escapeHtml(c.text||'On / Off')}</b></label>`;}
+  if(c.type==='slider'){const value=Number(runtimeComponentValue(c,mode)??c.min??0);inner=`<div class="slider-component" style="background:${bg};color:${textColor}"><input data-interactive-value type="range" min="${Number(c.min??0)}" max="${Number(c.max??100)}" step="${Number(c.step??1)}" value="${Number.isFinite(value)?value:0}" ${mode==='design'?'disabled':''}><span class="slider-value">${Number.isFinite(value)?value:0}</span></div>`;}
   if(c.type==='list'){const transparent=(c.listBackground==='transparent'||c.listTransparent===true);inner=`<div class="listbox database-list ${transparent?'transparent-list':''}" style="${transparent?'background:transparent;':''}">${listRowsMarkup(c,mode)}</div>`;}
   const handles=mode==='design'&&sel?['nw','ne','sw','se'].map(pos=>`<span class="resize-handle resize-${pos}" data-resize-handle="${pos}" title="Drag to resize"></span>`).join(''):'';
   const moveHandle=mode==='design'&&sel?`<span class="move-handle" data-move-handle title="Drag to move">✥</span>`:'';
@@ -654,16 +784,47 @@ function componentMarkup(c,mode){
 }
 
 function blockTutorialCard(){
-  const c=state.project.components.find(x=>x.id===state.selectedComponent);
-  const kind=state.blockTutorial||'overview';
-  const name=escapeHtml(c?.name||'your component');
-  let title='Build the blocks yourself',body=`Choose the kind of help you need. Nothing is inserted into the workspace unless your teacher has turned on Auto-add support for you.`;
-  if(kind==='button') {title=`Program ${name}`;body=`<ol><li>Open <b>Events</b> and drag <b>when … clicked</b> onto the workspace.</li><li>Choose <b>${name}</b> in its dropdown.</li><li>Open the category for the action you want. For example, use <b>Navigation → go to</b> to open another page, or <b>go back</b> for a Back button.</li><li>Snap the action block inside the event's <b>do</b> section.</li><li>Press <b>Run app</b> and click the button to test it.</li></ol>`;}
-  if(kind==='list') {title='Program the list tap';body=`<ol><li>Open <b>Events</b> and drag <b>when an item in … is tapped</b>.</li><li>Choose your List in the dropdown.</li><li>The row the user taps automatically becomes the <b>selected record</b>.</li><li>Open <b>Navigation</b>, drag <b>go to</b> inside the event, and choose your Details page.</li><li>Test by tapping several different list rows.</li></ol>`;}
-  if(kind==='data') {title=`Show database data in ${name}`;body=`<ol><li>Open <b>Events</b> and drag <b>when [Details] opens</b>.</li><li>Open <b>Screen</b> and drag <b>set … to … from selected record</b> inside it.</li><li>Choose <b>${name}</b> as the component.</li><li>Choose the database field it should display.</li><li>Repeat with the other placeholders on the Details page.</li></ol>`;}
-  return `<div class="block-tutorial-card"><div class="block-tutorial-head"><div><span class="tag ${autoBlocksEnabled()?'tag-good':''}">${autoBlocksEnabled()?'✨ Auto-add support ON':'🧩 You build the blocks'}</span><h3>${title}</h3></div></div><div class="block-help-tabs"><button class="btn small ${kind==='button'?'primary':''}" data-block-help="button">Button</button><button class="btn small ${kind==='list'?'primary':''}" data-block-help="list">List → Details</button><button class="btn small ${kind==='data'?'primary':''}" data-block-help="data">Details placeholders</button></div><div class="block-tutorial-body">${body}</div></div>`;
+  const c=state.project.components.find(x=>x.id===state.selectedComponent),capLevel=projectCapabilityLevel();
+  const kind=state.blockTutorial||'overview',name=escapeHtml(c?.name||'your component');
+  if(capLevel>=2){
+    let title='Use your new interactive tools',body=`Level ${capLevel} keeps all the earlier blocks and only adds the tools needed for this project.`;
+    if(kind==='interactive'||kind==='overview'){title=`Program ${name}`;body=`<ol><li>Use <b>Events → when … changes</b> if something should happen as the user changes an input, or use a Button click event.</li><li>Use <b>Logic → if … then / else</b> to make a decision from an input value.</li><li>Use Screen blocks to show a message, show/hide something, or copy an input value into a label/text box.</li><li>Run the app and test both outcomes.</li></ol>`;}
+    if(kind==='button'){title=`Program ${name}`;body=`<ol><li>Drag <b>when ${name} clicked</b> from Events.</li><li>${capLevel>=3?'To save a form, use one of the new Database record blocks.':'Put your IF / ELSE or Screen response blocks inside the event.'}</li><li>Snap the blocks together and test the button.</li></ol>`;}
+    if(kind==='datawrite'){title='Change database records';body=`<ol><li>In Design, map each form input to its <b>Database field to save</b>.</li><li>Put <b>add new record from form inputs</b> inside a button click to create a row.</li><li>Use <b>update selected record</b> or <b>delete selected record</b> when your app needs them.</li><li>Test mode uses a copy, so your saved project data is safe.</li></ol>`;}
+    if(kind==='variables'){title='Remember a value with Variables';body=`<ol><li>Use <b>set variable</b> to give a value a starting point.</li><li>Use <b>change variable by</b> for scores and counters.</li><li>Use <b>set … to variable</b> to display the current value.</li></ol>`;}
+    if(kind==='api'){const api=apiServiceInfo(state.project.apiService);title=`Connect ${api.name}`;body=`<ol><li>Put <b>🌐 ask ${api.name} using …</b> inside your Search button event.</li><li>Choose the Text Input that contains the user's search.</li><li>Add <b>set … to API result …</b> blocks for the values you want to display.</li><li>Use <b>if last API request worked</b> to give a useful failure message.</li><li>Test a real search and an invalid one.</li></ol>`;}
+    return `<div class="block-tutorial-card"><div class="block-tutorial-head"><div><span class="tag capability-tag">${escapeHtml(capabilityLabel(capLevel))}</span><h3>${title}</h3></div></div><div class="block-help-tabs"><button class="btn small ${kind==='interactive'||kind==='overview'?'primary':''}" data-block-help="interactive">Inputs + IF</button><button class="btn small ${kind==='button'?'primary':''}" data-block-help="button">Button</button>${capLevel>=3?`<button class="btn small ${kind==='datawrite'?'primary':''}" data-block-help="datawrite">Change data</button>`:''}${capLevel>=4?`<button class="btn small ${kind==='variables'?'primary':''}" data-block-help="variables">Variables</button>`:''}${capLevel>=5?`<button class="btn small ${kind==='api'?'primary':''}" data-block-help="api">Web / API</button>`:''}</div><div class="block-tutorial-body">${body}</div></div>`;
+  }
+  const kind1=kind;let title='Build the blocks yourself',body=`Choose the kind of help you need. Nothing is inserted into the workspace unless your teacher has turned on Auto-add support for you.`;
+  if(kind1==='button') {title=`Program ${name}`;body=`<ol><li>Open <b>Events</b> and drag <b>when … clicked</b> onto the workspace.</li><li>Choose <b>${name}</b>.</li><li>Use <b>Navigation → go to</b> or <b>go back</b>.</li><li>Snap the action inside the event.</li><li>Run the app and test it.</li></ol>`;}
+  if(kind1==='list') {title='Program the list tap';body=`<ol><li>Open <b>Events</b> and drag <b>when an item in … is tapped</b>.</li><li>Choose your List.</li><li>The tapped row becomes the <b>selected record</b>.</li><li>Use <b>Navigation → go to</b> and choose Details.</li></ol>`;}
+  if(kind1==='data') {title=`Show database data in ${name}`;body=`<ol><li>Drag <b>when Details opens</b>.</li><li>Use <b>Screen → set … to … from selected record</b>.</li><li>Choose <b>${name}</b> and the database field.</li></ol>`;}
+  return `<div class="block-tutorial-card"><div class="block-tutorial-head"><div><span class="tag ${autoBlocksEnabled()?'tag-good':''}">${autoBlocksEnabled()?'✨ Auto-add support ON':'🧩 You build the blocks'}</span><h3>${title}</h3></div></div><div class="block-help-tabs"><button class="btn small ${kind1==='button'?'primary':''}" data-block-help="button">Button</button><button class="btn small ${kind1==='list'?'primary':''}" data-block-help="list">List → Details</button><button class="btn small ${kind1==='data'?'primary':''}" data-block-help="data">Details placeholders</button></div><div class="block-tutorial-body">${body}</div></div>`;
 }
-function blocksView(){const pg=currentPage();return `<div class="section-head"><div><h2>Make ${escapeHtml(pg?.name||'this page')} work</h2><p>Each page has its own Blockly workspace, so you only see the blocks for the page you are programming.</p></div><button class="btn good" data-tab="test">▶ Run app</button></div>
+function apiPreviewMarkup(){
+  if(state.apiPreviewLoading)return `<div class="api-preview-empty">⏳ Contacting the API…</div>`;
+  if(state.apiPreviewError)return `<div class="notice warning"><b>Request failed:</b> ${escapeHtml(state.apiPreviewError)}</div>`;
+  const result=state.apiPreview;
+  if(!result)return `<div class="api-preview-empty">Try a request to see friendly data and the JSON response here.</div>`;
+  const service=apiServiceInfo(state.project.apiService);
+  return `<div class="api-friendly-result">${service.fields.map(([key,label])=>{const value=result[key]??'';return `<div><span>${escapeHtml(label)}</span>${/Url$/.test(key)&&/^https?:/i.test(String(value))?`<img src="${escapeAttr(value)}" alt="${escapeAttr(label)}">`:`<b>${escapeHtml(String(value))}</b>`}</div>`}).join('')}</div><details class="json-view"><summary>See the JSON your app received</summary><pre>${escapeHtml(JSON.stringify(result,null,2))}</pre></details>`;
+}
+function apiView(){
+  if(projectCapabilityLevel()<5)return `<div class="notice warning">The Connect/API workspace unlocks at Level 5.</div>`;
+  const current=apiServiceInfo(state.project.apiService),inspect=state.teacherInspectActive&&state.role==='teacher';
+  return `<div class="section-head"><div><h2>Connect to live data</h2><p>Choose one safe classroom API, test it here, then use the Web / API Blockly category.</p></div><span class="tag capability-tag">Level 5 only</span></div>
+  <div class="api-flow"><span>📱 Your app</span><b>→ request →</b><span>🌐 API</span><b>→ JSON →</b><span>✨ Your screen</span></div>
+  <div class="api-library">${Object.values(API_CATALOG).map(api=>`<button class="api-card ${api.id===current.id?'active':''}" data-api-service="${escapeAttr(api.id)}" ${inspect?'disabled':''}><span class="api-emoji">${api.emoji}</span><b>${escapeHtml(api.name)}</b><small>${escapeHtml(api.provider)}</small><p>${escapeHtml(api.description)}</p></button>`).join('')}</div>
+  <div class="api-workbench"><section class="card"><div class="project-meta"><span class="tag">Selected API</span><span class="tag tag-good">No pupil API key</span></div><h3>${current.emoji} ${escapeHtml(current.name)}</h3><p class="muted">${escapeHtml(current.description)}</p><label>${escapeHtml(current.queryLabel)}</label><div class="api-test-row"><input id="apiTestQuery" value="${escapeAttr(state.apiTestQuery||'')}" placeholder="${escapeAttr(current.placeholder)}"><button class="btn primary" data-action="test-api" ${inspect?'':' '}>▶ Test request</button></div><h4>Result fields available in Blockly</h4><div class="api-field-chips">${current.fields.map(([key,label])=>`<span title="JSON field: ${escapeAttr(key)}">${escapeHtml(label)} <code>${escapeHtml(key)}</code></span>`).join('')}</div><div class="notice"><b>Classroom safety:</b> these connectors use curated public endpoints and do not ask pupils to paste secret API keys into their apps.</div></section><section class="card api-preview"><h3>API response</h3>${apiPreviewMarkup()}</section></div>`;
+}
+function bindApi(){
+  $$('[data-api-service]').forEach(btn=>btn.onclick=()=>{const next=btn.dataset.apiService;if(!API_CATALOG[next]||next===state.project.apiService)return;state.project.apiService=next;const valid=new Set(apiServiceInfo(next).fields.map(([key])=>key)),fallback=apiServiceInfo(next).fields[0]?.[0]||'';const fix=items=>(items||[]).forEach(item=>{if(item.type==='set_from_api'&&!valid.has(item.field))item.field=fallback;fix(item.then);fix(item.else)});fix(state.project.program);state.project.blocklyPages={};state.apiPreview=null;state.apiPreviewError='';state.apiTestQuery='';saveProject();render();});
+  const input=$('#apiTestQuery');if(input)input.oninput=e=>state.apiTestQuery=e.target.value;
+  const test=$('[data-action="test-api"]');if(test)test.onclick=async()=>{state.apiTestQuery=$('#apiTestQuery')?.value||'';state.apiPreviewLoading=true;state.apiPreview=null;state.apiPreviewError='';render();try{state.apiPreview=await fetchApiData(state.project.apiService,state.apiTestQuery);state.project.apiTested=true;saveProject()}catch(err){state.apiPreviewError=err.message||'The API request failed.'}finally{state.apiPreviewLoading=false;render()}};
+}
+
+function blocksView(){const pg=currentPage();return `<div class="section-head"><div><h2>Make ${escapeHtml(pg?.name||'this page')} work</h2><p>Each page has its own Blockly workspace. This project only shows the programming tools unlocked for its capability level.</p></div><button class="btn good" data-tab="test">▶ Run app</button></div>
+<div class="capability-banner"><div><b>${escapeHtml(capabilityLabel(projectCapabilityLevel()))}</b><span>${escapeHtml(capabilityInfo(projectCapabilityLevel()).description)}</span></div><span class="tag">Blockly toolbox filtered</span></div>
 <div class="page-strip blocks-page-strip"><div class="page-tabs">${state.project.pages.map((p,i)=>`<button class="page-tab ${p.id===state.currentPageId?'active':''}" data-block-page="${p.id}"><span>${escapeHtml(p.name)}</span><small>Page ${i+1} blocks</small></button>`).join('')}</div><div class="page-actions"><span class="tag">Editing: ${escapeHtml(pg?.name||'Page')}</span></div></div>
 ${blockTutorialCard()}
 <div class="blockly-layout"><section class="blockly-card"><div class="blockly-help"><b>Remember:</b> <span>A list tap chooses the selected database record. Screen blocks display fields from it, and Navigation blocks move between pages.</span></div><div id="blocklyDiv" class="blockly-workspace"></div></section>
@@ -684,9 +845,10 @@ function blockMarkup(b){
   return '';
 }
 
-function testView(){return `<div class="section-head"><div><h2>Test your app</h2><p>Use the buttons on the phone. The debugger explains what is happening.</p></div><div><button class="btn" data-action="restart-test">↻ Restart</button> <button class="btn primary" data-tab="blocks">Edit blocks</button></div></div>
-<div class="test-grid"><section class="test-stage"><div>${phoneMarkup('test')}</div></section><aside class="test-side"><div class="record-card"><h3>Current database record</h3>${recordInspector()}</div><div class="debug"><h3>🐞 What's happening?</h3><div id="debugLog">${state.testLogs.length?state.testLogs.map(l=>`<div class="log-line ${l.kind||''}">${escapeHtml(l.text)}</div>`).join(''):`<div class="log-line">Press Restart or use the app buttons to see events here.</div>`}</div></div></aside></div>`}
-function recordInspector(){const r=state.project.records[state.currentRecord]||{}; return `<div class="record-grid">${state.project.fields.map(f=>`<dt>${escapeHtml(f.name)}</dt><dd>${f.type==='image'?'[image]':escapeHtml(String(r[f.id]??''))}</dd>`).join('')}</div>`}
+function testView(){const inspector=projectCapabilityLevel()>=5?`<div class="record-card api-test-inspector"><h3>🌐 Last API result</h3>${testApiInspector()}</div>`:`<div class="record-card"><h3>Current database record</h3>${recordInspector()}</div>`;return `<div class="section-head"><div><h2>Test your app</h2><p>Use the buttons on the phone. The debugger explains what is happening.</p></div><div><button class="btn" data-action="restart-test">↻ Restart</button> <button class="btn primary" data-tab="blocks">Edit blocks</button></div></div>
+<div class="test-grid"><section class="test-stage"><div>${phoneMarkup('test')}</div></section><aside class="test-side">${inspector}<div class="debug"><h3>🐞 What's happening?</h3><div id="debugLog">${state.testLogs.length?state.testLogs.map(l=>`<div class="log-line ${l.kind||''}">${escapeHtml(l.text)}</div>`).join(''):`<div class="log-line">Press Restart or use the app buttons to see events here.</div>`}</div></div></aside></div>`}
+function testApiInspector(){if(state.testApiError)return `<div class="notice warning">${escapeHtml(state.testApiError)}</div>`;if(!state.testApiResult||!Object.keys(state.testApiResult).length)return `<div class="empty-note">Run a search to see the API result here.</div>`;return `<pre class="mini-json">${escapeHtml(JSON.stringify(state.testApiResult,null,2))}</pre>`}
+function recordInspector(){const rows=Array.isArray(state.testRecords)?state.testRecords:state.project.records;const r=rows[state.currentRecord]||{}; return `<div class="record-grid">${state.project.fields.map(f=>`<dt>${escapeHtml(f.name)}</dt><dd>${f.type==='image'?'[image]':escapeHtml(String(r[f.id]??''))}</dd>`).join('')}</div>`}
 
 
 function publishView(){
@@ -701,7 +863,8 @@ function publishView(){
   <div class="notice" style="margin-top:14px">Your app icon is stored separately and <b>does not use one of your 20 personal image slots</b>.</div>
   <button class="btn primary publish-main-btn" data-action="publish-project">${live?'Update published app':'🚀 Publish app'}</button>
   ${live?`<button class="btn small" data-action="unpublish-project" style="margin-top:8px">Unpublish</button>`:''}</section>
-  <section class="card"><h3>${live?'Your Android app is ready':'Android publishing'}</h3><p class="muted">${live?'Scan the QR code on an Android phone, open the app in Chrome, then tap Install app.':'Choose an icon and press Publish. DataApp Studio will create an unlisted public snapshot, unique link and QR code.'}</p><div class="publish-phone"><div class="home-icon"><img src="${escapeAttr(pub.icon512||iconSrc)}"><span>${escapeHtml(pub.appName||state.project.name)}</span></div></div>
+  <section class="card"><h3>${live?'Your phone app is ready':'Install on phone'}</h3><p class="muted">${live?'Scan the same QR code with Android, iPhone or iPad. Android can use the browser install prompt; on iPhone/iPad open the link in Safari and choose Share → Add to Home Screen.':'Choose an icon and press Publish. DataApp Studio will create one unlisted app link and QR code that works on Android, iPhone and iPad.'}</p><div class="publish-phone"><div class="home-icon"><img src="${escapeAttr(pub.icon512||iconSrc)}"><span>${escapeHtml(pub.appName||state.project.name)}</span></div></div>
+  ${live?`<div class="phone-install-guides"><div><b>Android</b><span>Scan QR → open in Chrome → Install app / Add to Home screen.</span></div><div><b>iPhone / iPad</b><span>Scan QR → open in Safari → Share → Add to Home Screen → Add.</span></div></div>`:''}
   ${live?`<div class="publish-result"><div id="publishQr" class="qr-box" aria-label="QR code"></div><div class="share-url">${escapeHtml(shareUrl)}</div><div class="publish-actions"><button class="btn primary" data-action="open-published">Open app</button><button class="btn" data-action="copy-published">Copy link</button></div><div class="notice goodish">The link is a <b>published snapshot</b>. People opening it do not get access to the pupil's editable project or Google account.</div></div>`:
   `<div class="notice warning">Publishing requires Firebase and a signed-in pupil account. Anyone with the QR code or link can open the published app, but they cannot access the pupil's classroom account or editable project.</div>`}</section></div>`;
 }
@@ -745,7 +908,8 @@ function makePublishSnapshot(){
 }
 async function publishCurrentProject(button){
   if(!CLOUD_MODE||!state.user||state.role!=='pupil'){alert('Sign in as a pupil with Firebase before publishing.');return}
-  if(!state.project.fields.length||!state.project.components.length){alert('Build your database and app screen before publishing.');return}
+  if(!state.project.components.length){alert('Design your app screen before publishing.');return}
+  if([1,3].includes(projectCapabilityLevel())&&!state.project.fields.length){alert('This project level needs database fields before publishing.');return}
   const pub=state.project.publish||(state.project.publish={});
   if(!pub.icon&&!pub.iconData){alert('Choose an app icon first.');return}
   button.disabled=true;const original=button.textContent;button.textContent='Publishing…';
@@ -821,19 +985,21 @@ function bindBuilder(){
   if(state.teacherInspectActive&&state.role==='teacher'){
     $$('[data-page-select]').forEach(b=>b.onclick=()=>{state.currentPageId=b.dataset.pageSelect;state.selectedComponent=null;render()});
     $$('[data-device]').forEach(b=>b.onclick=()=>{state.device=b.dataset.device;render()});
+    if(state.tab==='api') bindApi();
     if(state.tab==='blocks') bindBlocks(true);
     if(state.tab==='test') bindTest();
     return;
   }
   if(state.tab==='data') bindData();
   if(state.tab==='design') bindDesign();
+  if(state.tab==='api') bindApi();
   if(state.tab==='blocks') bindBlocks();
   if(state.tab==='test') bindTest();
   if(state.tab==='publish') bindPublish();
   const manageImages=$('[data-action="manage-images"]'); if(manageImages)manageImages.onclick=showPersonalManager;
   const tutorialToggle=$('[data-action="toggle-tutorial"]'); if(tutorialToggle)tutorialToggle.onclick=()=>{state.project.tutorialEnabled=state.project.tutorialEnabled===false;saveProject();render()};
   $$('[data-tutorial-tab]').forEach(b=>b.onclick=()=>{state.tab=b.dataset.tutorialTab;if(state.tab==='test')startTest(false);render()});
-  const reset=$('[data-action="reset"]'); if(reset) reset.onclick=()=>{if(confirm('Clear this project and start again from a blank canvas? This removes its fields, records, screen components and blocks.')){const name=state.project.name,assignmentId=state.project.assignmentId||'',tutorialEnabled=state.project.tutorialEnabled!==false;state.project=freshBlankProject(name,assignmentId);state.project.tutorialEnabled=tutorialEnabled;state.currentRecord=0;state.currentPageId=state.project.pages[0].id;state.pageHistory=[];state.selectedComponent=null;saveProject();render()}};
+  const reset=$('[data-action="reset"]'); if(reset) reset.onclick=()=>{if(confirm('Clear this project and start again from a blank canvas? This removes its fields, records, screen components and blocks.')){const name=state.project.name,assignmentId=state.project.assignmentId||'',tutorialEnabled=state.project.tutorialEnabled!==false,capabilityLevel=projectCapabilityLevel();state.project=freshBlankProject(name,assignmentId,capabilityLevel);state.project.tutorialEnabled=tutorialEnabled;state.currentRecord=0;state.currentPageId=state.project.pages[0].id;state.pageHistory=[];state.selectedComponent=null;saveProject();render()}};
 }
 
 function bindData(){
@@ -961,6 +1127,10 @@ function convertFieldValue(value,oldType,newType){
 }
 function clearIncompatibleFieldConnections(fieldId,newType=null){
   for(const c of state.project.components||[]){
+    if(interactiveComponentType(c.type)&&c.dataField===fieldId){
+      if(newType===null)c.dataField='';
+      else if((['numberInput','slider'].includes(c.type)&&!['number','rating'].includes(newType))||(c.type==='switch'&&newType!=='boolean')||(c.type==='textInput'&&['image','imageUrl'].includes(newType)))c.dataField='';
+    }
     if(c.type==='list'){
       if(c.listImageField===fieldId && newType && !['image','imageUrl'].includes(newType))c.listImageField='';
       if((c.listTitleField===fieldId||c.listSubtitleField===fieldId) && newType && ['image','imageUrl'].includes(newType)){if(c.listTitleField===fieldId)c.listTitleField='';if(c.listSubtitleField===fieldId)c.listSubtitleField='';}
@@ -977,7 +1147,7 @@ function deleteField(fieldId){
   const f=state.project.fields.find(x=>x.id===fieldId);if(!f)return;
   if(!confirm(`Delete the field “${f.name}”? This removes this column and its data from every record. This cannot be undone.`))return;
   state.project.fields=state.project.fields.filter(x=>x.id!==fieldId);state.project.records.forEach(r=>delete r[fieldId]);clearIncompatibleFieldConnections(fieldId,null);
-  state.project.program=(state.project.program||[]).filter(b=>!(b.type==='set_field'&&b.field===fieldId));state.project.blocklyState=null;state.project.blocklyPages={};saveProject();render();
+  state.project.program=(state.project.program||[]).map(b=>cleanProgramAction(b,new Set(),'',fieldId)).filter(Boolean);state.project.blocklyState=null;state.project.blocklyPages={};saveProject();render();
 }
 
 function showFieldModal(){
@@ -985,13 +1155,24 @@ function showFieldModal(){
   $('#cancelModal').onclick=()=>wrap.remove();$('#createField').onclick=()=>{const name=$('#newFieldName').value.trim();if(!name)return;let id=name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||`field_${Date.now()}`;if(state.project.fields.some(f=>f.id===id)) id+=`_${Date.now().toString().slice(-4)}`;const type=$('#newFieldType').value;state.project.fields.push({id,name,type});state.project.records.forEach(r=>r[id]=defaultValueForType(type));wrap.remove();saveProject();render()};
 }
 
+function cleanProgramAction(b,deletedIds=new Set(),deletedPage='',deletedField=''){
+  if(!b)return null;
+  if(deletedField&&b.type==='set_field'&&b.field===deletedField)return null;
+  if(deletedPage&&b.type==='navigate_page'&&b.page===deletedPage)return null;
+  if(deletedIds.has(b.target)||deletedIds.has(b.source))return null;
+  if(b.type==='if_component'){
+    if(deletedIds.has(b.source))return null;
+    return {...b,then:(b.then||[]).map(x=>cleanProgramAction(x,deletedIds,deletedPage,deletedField)).filter(Boolean),else:(b.else||[]).map(x=>cleanProgramAction(x,deletedIds,deletedPage,deletedField)).filter(Boolean)};
+  }
+  return b;
+}
 function pruneProgram(deletedIds=new Set(),deletedPage=''){
   const kept=[];let skipGroup=false;
   for(const b of state.project.program){
-    if(['event_open','event_click','event_list_click'].includes(b.type)){
-      skipGroup=(b.type==='event_open'&&deletedPage&&(b.page||state.project.pages[0]?.id)===deletedPage)||(['event_click','event_list_click'].includes(b.type)&&deletedIds.has(b.component));
+    if(['event_open','event_click','event_list_click','event_change'].includes(b.type)){
+      skipGroup=(b.type==='event_open'&&deletedPage&&(b.page||state.project.pages[0]?.id)===deletedPage)||(['event_click','event_list_click','event_change'].includes(b.type)&&deletedIds.has(b.component));
       if(!skipGroup)kept.push(b);
-    }else if(!skipGroup&&!deletedIds.has(b.target)&&!(b.type==='navigate_page'&&deletedPage&&b.page===deletedPage))kept.push(b);
+    }else if(!skipGroup){const cleaned=cleanProgramAction(b,deletedIds,deletedPage);if(cleaned)kept.push(cleaned);}
   }
   state.project.program=kept;state.project.blocklyState=null;state.project.blocklyPages={};
 }
@@ -1032,8 +1213,19 @@ function bindDesign(){
     state.project.pages=state.project.pages.filter(p=>p.id!==pg.id);delete state.project.blocklyPages?.[pg.id];state.currentPageId=state.project.pages[0].id;state.selectedComponent=null;state.project.blocklyState=null;saveProject();render();
   };
   $$('[data-add-component]').forEach(b=>b.onclick=()=>{
-    const type=b.dataset.addComponent;const n=state.project.components.filter(c=>c.type===type).length+1;
-    const c={id:`${type}_${Date.now()}`,type,name:`${cap(type)}${n}`,pageId:state.currentPageId,x:30,y:75+(n*18),w:type==='image'?220:type==='list'?280:200,h:type==='image'?150:type==='label'?44:type==='list'?330:type==='input'?150:44,text:type==='button'?'Button':type==='input'?'Long text appears here':type==='label'?'New label':'',fontSize:18,align:'center',textColor:type==='button'?'#ffffff':'#172033',backgroundColor:type==='button'?'#5b5ce2':type==='input'?'#ffffff':'',src:type==='image'?imageSvg('🖼️','Your image'):'',listLayout:'image-title-subtitle',listImageField:'',listTitleField:'',listSubtitleField:'',listBackground:'white',listTransparent:false,navigateToPage:''};
+    const type=b.dataset.addComponent;const allowed=componentToolsForLevel().some(x=>x[0]===type);if(!allowed){alert('That component is not unlocked for this project.');return;}
+    const n=state.project.components.filter(c=>c.type===type).length+1;
+    const names={textInput:'TextInput',numberInput:'NumberInput',dropdown:'Dropdown',switch:'Switch',slider:'Slider'};
+    const c={id:`${type}_${Date.now()}`,type,name:`${names[type]||cap(type)}${n}`,pageId:state.currentPageId,x:30,y:75+(n*18),
+      w:type==='image'?220:type==='list'?280:type==='switch'?180:200,
+      h:type==='image'?150:type==='label'?44:type==='list'?330:type==='input'?150:type==='slider'?64:44,
+      text:type==='button'?'Button':type==='input'?'Long text appears here':type==='label'?'New label':type==='switch'?'On / Off':'',
+      fontSize:18,align:'center',textColor:type==='button'?'#ffffff':'#172033',
+      backgroundColor:type==='button'?'#5b5ce2':['input','textInput','numberInput','dropdown','switch','slider'].includes(type)?'#ffffff':'',
+      src:type==='image'?imageSvg('🖼️','Your image'):'',
+      listLayout:'image-title-subtitle',listImageField:'',listTitleField:'',listSubtitleField:'',listBackground:'white',listTransparent:false,navigateToPage:'',
+      placeholder:type==='numberInput'?'Enter a number':'Type here...',defaultValue:type==='switch'?false:type==='slider'?50:'',dataField:'',
+      options:type==='dropdown'?'Option 1\nOption 2\nOption 3':'',min:0,max:100,step:1,visible:true};
     state.project.components.push(c);state.selectedComponent=c.id;saveProject();render()
   });
   $$('.screen-component[data-component]').forEach(el=>{
@@ -1060,7 +1252,7 @@ function bindDesign(){
   $$('[data-prop]').forEach(inp=>{
     const update=()=>{
       const c=state.project.components.find(x=>x.id===state.selectedComponent);if(!c)return;const prop=inp.dataset.prop;let v=inp.value;
-      if(['w','h','fontSize'].includes(prop)){if(v==='')return;v=Number(v);if(!Number.isFinite(v))return;}
+      if(['w','h','fontSize','min','max','step'].includes(prop)){if(v==='')return;v=Number(v);if(!Number.isFinite(v))return;}if(prop==='defaultValue'&&['numberInput','slider'].includes(c.type)){v=v===''?'':Number(v);}
       c[prop]=v;saveProject();applyDesignPropPreview(c);
     };
     inp.oninput=update;
@@ -1077,6 +1269,10 @@ function bindDesign(){
     const c=state.project.components.find(x=>x.id===state.selectedComponent);if(!c||c.type!=='list')return;
     c[inp.dataset.listToggle]=Boolean(inp.checked);saveProject();render();
   });
+  $$('[data-component-toggle]').forEach(inp=>inp.onchange=()=>{
+    const c=state.project.components.find(x=>x.id===state.selectedComponent);if(!c)return;
+    c[inp.dataset.componentToggle]=Boolean(inp.checked);saveProject();render();
+  });
   $$('[data-device]').forEach(btn=>btn.onclick=()=>{state.device=btn.dataset.device;render()});
   $$('[data-program-component]').forEach(btn=>btn.onclick=()=>{
     state.selectedComponent=btn.dataset.programComponent||state.selectedComponent;
@@ -1091,7 +1287,7 @@ function connectListNavigation(c){
   if(!autoBlocksEnabled())return;
   const kept=[];let skipping=false;
   for(const b of state.project.program){
-    if(['event_open','event_click','event_list_click'].includes(b.type)){
+    if(['event_open','event_click','event_list_click','event_change'].includes(b.type)){
       skipping=b.type==='event_list_click'&&b.component===c.id;
       if(!skipping)kept.push(b);
     }else if(!skipping)kept.push(b);
@@ -1114,7 +1310,7 @@ function bindBlocks(readOnly=false){
         const pageId=state.currentPageId||state.project.pages[0]?.id;
         state.blocklyWorkspace=await initBlocklyEditor({
           element:host,project:state.project,pageId,components:state.project.components,fields:state.project.fields,pages:state.project.pages,
-          readOnly,
+          readOnly,capabilityLevel:projectCapabilityLevel(),
           onChange:({blocklyState,program})=>{
             if(readOnly)return;
             state.project.blocklyPages=state.project.blocklyPages||{};state.project.blocklyPages[pageId]=blocklyState;replaceProgramForPage(pageId,program);saveProject();
@@ -1131,12 +1327,13 @@ function bindBlocks(readOnly=false){
 function assignmentCard(a){
   const guided=(a.tutorialMode||'guided')!=='checklist';
   const attempts=(state.cloudProjects||[]).filter(p=>p.assignmentId===a.id).length;
-  return `<div class="card assignment-card"><div class="project-meta"><span class="tag">${escapeHtml(a.level||'Guided')}</span><span class="tag">Blank canvas</span><span class="tag">${guided?'🧭 Tutorial':'✓ Checklist'}</span>${attempts?`<span class="tag tag-good">${attempts} app${attempts===1?'':'s'} started</span>`:''}</div><h3>${escapeHtml(a.title)}</h3><p class="muted">Starting this task creates a new app. Your other apps are left exactly as they are.</p><button class="btn" data-start-assignment="${a.id}" ${state.cloudProjects.length>=MAX_PUPIL_APPS?'disabled':''}>${attempts?'Start another attempt':'Start new app'} →</button></div>`;
+  const capLevel=Math.max(1,Math.min(5,Number(a.capabilityLevel)||1)),cap=capabilityInfo(capLevel),brief=projectBrief(capLevel);
+  return `<div class="card assignment-card"><div class="project-meta"><span class="tag">${escapeHtml(a.level||'Guided')}</span><span class="tag capability-tag">${escapeHtml(capabilityLabel(capLevel))}</span><span class="tag">${guided?'🧭 Tutorial':'✓ Checklist'}</span>${attempts?`<span class="tag tag-good">${attempts} app${attempts===1?'':'s'} started</span>`:''}</div><h3>${escapeHtml(a.title)}</h3><p class="muted">${brief.emoji} <b>${escapeHtml(brief.title)}</b> — ${escapeHtml(brief.mission)}</p>${a.teacherInstructions?`<p class="muted"><b>Teacher:</b> ${escapeHtml(a.teacherInstructions)}</p>`:''}<p class="muted">Only the components and blocks for this level appear while you build. Your other apps are left exactly as they are.</p><details class="assignment-brief-mini"><summary>View project brief</summary><ul>${brief.success.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul></details><button class="btn" data-start-assignment="${a.id}" ${state.cloudProjects.length>=MAX_PUPIL_APPS?'disabled':''}>${attempts?'Start another attempt':'Start new app'} →</button></div>`;
 }
 function startAssignment(id){
   const a=state.assignments.find(x=>x.id===id); if(!a)return;
   if((state.cloudProjects||[]).length>=MAX_PUPIL_APPS){alert(`You can keep up to ${MAX_PUPIL_APPS} apps in a class. Delete an old app before starting another.`);return;}
-  state.project=freshBlankProject(a.title,a.id);
+  state.project=freshBlankProject(a.title,a.id,a.capabilityLevel||1);
   state.project.tutorialEnabled=(a.tutorialMode||'guided')!=='checklist';
   state.project.updatedAtMs=Date.now(); addProjectToList(state.project);
   state.selectedComponent=null; state.currentRecord=0; state.currentPageId=state.project.pages[0].id; state.pageHistory=[]; state.role=state.role||'pupil';
@@ -1145,9 +1342,9 @@ function startAssignment(id){
 function showNewAppModal(){
   if((state.cloudProjects||[]).length>=MAX_PUPIL_APPS){alert(`You can keep up to ${MAX_PUPIL_APPS} apps in a class. Delete an old app before creating another.`);return;}
   const wrap=document.createElement('div');wrap.className='modal-backdrop';
-  wrap.innerHTML=`<div class="modal"><h3>Create a new app</h3><div class="field"><label>App name</label><input id="newAppName" value="My New App" maxlength="50" autofocus></div><div class="field"><label>Help while I build</label><select id="newAppTutorial"><option value="guided" selected>Guided tutorial</option><option value="checklist">Checklist only</option></select></div><div class="notice">This creates a completely separate blank app. Your existing apps will not be changed.</div><div class="modal-actions"><button class="btn" id="cancelNewApp">Cancel</button><button class="btn primary" id="createNewApp">Create app</button></div></div>`;
+  wrap.innerHTML=`<div class="modal"><h3>Create a new app</h3><div class="field"><label>App name</label><input id="newAppName" value="My New App" maxlength="50" autofocus></div><div class="field"><label>Help while I build</label><select id="newAppTutorial"><option value="guided" selected>Guided tutorial</option><option value="checklist">Checklist only</option></select></div><div class="notice">This creates a completely separate blank <b>Level 1 — Database Explorer</b> app. Teacher assignments unlock higher-level tools without changing your other apps.</div><div class="modal-actions"><button class="btn" id="cancelNewApp">Cancel</button><button class="btn primary" id="createNewApp">Create app</button></div></div>`;
   document.body.appendChild(wrap);$('#cancelNewApp').onclick=()=>wrap.remove();
-  $('#createNewApp').onclick=()=>{const name=$('#newAppName').value.trim()||'My New App';state.project=freshBlankProject(name,'');state.project.tutorialEnabled=$('#newAppTutorial').value==='guided';state.project.updatedAtMs=Date.now();addProjectToList(state.project);state.currentRecord=0;state.currentPageId=state.project.pages[0].id;state.pageHistory=[];state.selectedComponent=null;wrap.remove();saveProject();state.view='builder';state.tab='data';render();};
+  $('#createNewApp').onclick=()=>{const name=$('#newAppName').value.trim()||'My New App';state.project=freshBlankProject(name,'',1);state.project.tutorialEnabled=$('#newAppTutorial').value==='guided';state.project.updatedAtMs=Date.now();addProjectToList(state.project);state.currentRecord=0;state.currentPageId=state.project.pages[0].id;state.pageHistory=[];state.selectedComponent=null;wrap.remove();saveProject();state.view='builder';state.tab='data';render();};
 }
 function findPupilProject(id){ return (state.cloudProjects||[]).find(p=>projectIdOf(p)===id); }
 function openPupilProject(id){
@@ -1179,21 +1376,29 @@ async function deletePupilProject(id){
 
 function showAssignmentModal(){
   const wrap=document.createElement('div');wrap.className='modal-backdrop';
-  wrap.innerHTML=`<div class="modal"><h3>Create an assignment</h3>
-  <div class="field"><label>Assignment title</label><input id="assignmentTitle" value="My Database App"></div>
-  <div class="notice">Pupils always begin this assignment with a completely blank database, screen and block canvas.</div>
+  wrap.innerHTML=`<div class="modal capability-modal"><h3>Create an assignment</h3>
+  <div class="field"><label>Assignment title</label><input id="assignmentTitle" value="Collection Explorer"></div>
+  <div class="notice">Every pupil starts this assignment with a blank database, screen and block canvas. <b>The capability level controls which tools they can see.</b></div>
+  <div class="field"><label>Project capability</label><select id="assignmentCapability">
+    ${[1,2,3,4,5].map(n=>`<option value="${n}" ${n===1?'selected':''}>${escapeHtml(capabilityLabel(n))} — ${escapeHtml(capabilityInfo(n).short)}</option>`).join('')}
+  </select><small class="prop-help" id="capabilityHelp">${escapeHtml(capabilityInfo(1).description)}</small></div>
+  <div class="capability-preview">
+    ${[1,2,3,4,5].map(n=>`<div class="capability-step ${n===1?'active':''}" data-cap-preview="${n}"><b>Level ${n}</b><span>${escapeHtml(capabilityInfo(n).name)}</span></div>`).join('')}
+  </div>
+  <div id="recommendedBrief" class="recommended-brief"></div>
+  <div class="field"><label>Extra instructions for this class (optional)</label><textarea id="assignmentInstructions" rows="3" placeholder="e.g. Use a Scottish location, or work with your partner's test data."></textarea></div>
   <div class="field"><label>Pupil support</label><select id="assignmentTutorial"><option value="guided" selected>Guided tutorial — step by step</option><option value="checklist">Checklist only — more independent</option></select></div>
   <div class="field"><label>Support level label</label><select id="assignmentLevel"><option>Starter</option><option selected>Guided</option><option>Independent</option></select></div>
-  <div class="field"><label>Minimum records</label><input id="assignmentRecords" type="number" value="3" min="1" max="30"></div>
+  <div class="field"><label>Minimum records</label><input id="assignmentRecords" type="number" value="3" min="0" max="30"><small class="prop-help">Levels 2, 4 and 5 can be interactive without needing database records.</small></div>
   <div class="modal-actions"><button class="btn" id="cancelAssignment">Cancel</button><button class="btn primary" id="createAssignment">Create</button></div></div>`;
   document.body.appendChild(wrap);
   $('#cancelAssignment').onclick=()=>wrap.remove();
+  let previousBriefTitle=projectBrief(1).title;const showBrief=n=>{const b=projectBrief(n),host=$('#recommendedBrief');if(host)host.innerHTML=`<span>${b.emoji}</span><div><b>Recommended project: ${escapeHtml(b.title)}</b><p>${escapeHtml(b.mission)}</p></div>`;const title=$('#assignmentTitle');if(title&&(!title.value.trim()||title.value.trim()===previousBriefTitle||title.value.trim()==='My Database App'))title.value=b.title;previousBriefTitle=b.title;};showBrief(1);$('#assignmentCapability').onchange=e=>{const n=Number(e.target.value)||1;$('#capabilityHelp').textContent=capabilityInfo(n).description;$$('[data-cap-preview]',wrap).forEach(x=>x.classList.toggle('active',Number(x.dataset.capPreview)<=n));const rec=$('#assignmentRecords');if(rec)rec.value=({1:3,2:0,3:2,4:0,5:0})[n]??0;showBrief(n);};
   $('#createAssignment').onclick=async()=>{
     const title=$('#assignmentTitle').value.trim()||'New assignment';
-    const assignment={id:CLOUD_MODE?'':`a-${Date.now()}`,title,template:'blank',tutorialMode:$('#assignmentTutorial').value,level:$('#assignmentLevel').value,requirements:{records:Number($('#assignmentRecords').value)||1,components:4,blocks:4}};
+    const assignment={id:CLOUD_MODE?'':`a-${Date.now()}`,title,template:'blank',tutorialMode:$('#assignmentTutorial').value,level:$('#assignmentLevel').value,capabilityLevel:Number($('#assignmentCapability').value)||1,teacherInstructions:($('#assignmentInstructions')?.value||'').trim(),requirements:{records:Math.max(0,Number($('#assignmentRecords').value)||0),components:4,blocks:4}};
     try{
       if(CLOUD_MODE){if(!state.currentClassId)throw new Error('Choose a class first.');assignment.id=await cloudSaveAssignment(state.currentClassId,assignment)}
-      else saveAssignments();
       state.assignments.push(assignment); if(!CLOUD_MODE)saveAssignments(); wrap.remove(); render();
     }catch(err){alert(err.message)}
   };
@@ -1235,78 +1440,179 @@ function moveBlock(id,delta){
   saveProject(); render();
 }
 function checklist(){
-  const hasEvent=state.project.program.some(b=>['event_open','event_click','event_list_click'].includes(b.type));
-  const connected=state.project.program.some(b=>b.type==='set_field');
-  const listReady=state.project.components.some(c=>c.type==='list'&&(c.listTitleField||c.listImageField));
-  const multiPage=state.project.pages.length>=2;
+  const capLevel=projectCapabilityLevel();
+  const hasEvent=state.project.program.some(b=>['event_open','event_click','event_list_click','event_change'].includes(b.type));
+  if(capLevel===1){
+    const connected=state.project.program.some(b=>b.type==='set_field');
+    const listReady=state.project.components.some(c=>c.type==='list'&&(c.listTitleField||c.listImageField));
+    const multiPage=state.project.pages.length>=2;
+    return [
+      {label:'Data',ok:state.project.records.length>=3&&state.project.fields.length>=3},
+      {label:'Design',ok:state.project.components.length>=3},
+      {label:'Pages/List',ok:multiPage&&listReady},
+      {label:'Events',ok:hasEvent},
+      {label:'Connected',ok:connected}
+    ];
+  }
+  if(capLevel===2)return [
+    {label:'Design',ok:state.project.components.length>=2},
+    {label:'Input',ok:state.project.components.some(c=>interactiveComponentType(c.type))},
+    {label:'Event',ok:hasEvent},
+    {label:'IF / ELSE',ok:programHasType(state.project.program,'if_component')},
+    {label:'Response',ok:programHasType(state.project.program,['show_message','set_visible','set_from_component'])}
+  ];
+  if(capLevel===3)return [
+    {label:'Fields',ok:state.project.fields.length>=2},
+    {label:'Form',ok:state.project.components.filter(c=>interactiveComponentType(c.type)).length>=2},
+    {label:'Mapped',ok:state.project.components.some(c=>interactiveComponentType(c.type)&&c.dataField)},
+    {label:'Event',ok:hasEvent},
+    {label:'Change data',ok:programHasType(state.project.program,['add_record_form','update_record_form','delete_record'])}
+  ];
+  if(capLevel===4)return [
+    {label:'Design',ok:state.project.components.length>=2},
+    {label:'Event',ok:hasEvent},
+    {label:'Variable',ok:programHasType(state.project.program,['set_variable','change_variable'])},
+    {label:'Display',ok:programHasType(state.project.program,'set_from_variable')},
+    {label:'Tested',ok:state.tutorialTested===true}
+  ];
   return [
-    {label:'Data',ok:state.project.records.length>=3&&state.project.fields.length>=3},
-    {label:'Design',ok:state.project.components.length>=3},
-    {label:'Pages/List',ok:multiPage&&listReady},
-    {label:'Events',ok:hasEvent},
-    {label:'Connected',ok:connected}
+    {label:'Search input',ok:state.project.components.some(c=>c.type==='textInput')},
+    {label:'Event',ok:hasEvent},
+    {label:'API request',ok:programHasType(state.project.program,'api_request')},
+    {label:'Live result',ok:programHasType(state.project.program,'set_from_api')},
+    {label:'Failure handled',ok:programHasType(state.project.program,'if_api_success')}
   ];
 }
 function checklistBadges(){return checklist().map(x=>`<span class="tag ${x.ok?'tag-good':''}">${x.ok?'✓':'○'} ${x.label}</span>`).join('')}
 function projectProgress(){const c=checklist();return Math.round(c.filter(x=>x.ok).length/c.length*100)}
 
+function initialInteractiveValue(c){
+  if(c.type==='dropdown'){const opts=dropdownOptions(c);return opts.includes(String(c.defaultValue??''))?String(c.defaultValue):opts[0]||'';}
+  return c.defaultValue??(c.type==='switch'?false:c.type==='slider'?Number(c.min??0):'');
+}
 function startTest(withRender=true){
   state.currentRecord=0;state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.testLogs=[];state.tutorialTested=true;
-  log(`${pageName(state.currentPageId)} opened`,'good');runEvent('open',null,{pageId:state.currentPageId});if(withRender)render()
+  state.testRecords=clone(state.project.records||[]);
+  state.testValues={};state.testVisibility={};state.testVariables={};state.testDisplayValues={};state.testApiResult={};state.testApiSuccess=false;state.testApiError='';
+  for(const c of state.project.components||[]){state.testVisibility[c.id]=c.visible!==false;if(interactiveComponentType(c.type))state.testValues[c.id]=initialInteractiveValue(c);}
+  log(`${pageName(state.currentPageId)} opened`,'good');const opening=runEvent('open',null,{pageId:state.currentPageId});if(withRender)render();opening.then(()=>{if(state.tab==='test')render()})
 }
 function bindTest(){
-  $('[data-action="restart-test"]').onclick=()=>startTest(true);
-  $$('.screen-component[data-test-component] button').forEach(btn=>btn.onclick=()=>{
-    const id=btn.closest('[data-test-component]').dataset.testComponent;log(`${nameOfComponent(id)} clicked`,'good');runEvent('click',id,{pageId:state.currentPageId});render()
+  const restart=$('[data-action="restart-test"]');if(restart)restart.onclick=()=>startTest(true);
+  $$('.screen-component[data-test-component] button').forEach(btn=>btn.onclick=async()=>{
+    const id=btn.closest('[data-test-component]').dataset.testComponent;log(`${nameOfComponent(id)} clicked`,'good');await runEvent('click',id,{pageId:state.currentPageId});render()
   });
-  $$('.screen-component[data-test-component] [data-list-index]').forEach(row=>row.onclick=()=>{
+  $$('.screen-component[data-test-component] [data-list-index]').forEach(row=>row.onclick=async()=>{
     const host=row.closest('[data-test-component]'),id=host?.dataset.testComponent,index=Number(row.dataset.listIndex);if(!id||Number.isNaN(index))return;
     state.currentRecord=index;log(`${nameOfComponent(id)} row ${index+1} tapped → selected record ${index+1}`,'good');
-    runEvent('list_click',id,{pageId:state.currentPageId,index});
-    render();
+    await runEvent('list_click',id,{pageId:state.currentPageId,index});render();
+  });
+  $$('.screen-component[data-test-component] [data-interactive-value]').forEach(control=>{
+    const host=control.closest('[data-test-component]'),id=host?.dataset.testComponent,c=state.project.components.find(x=>x.id===id);if(!id||!c)return;
+    control.onchange=async()=>{let value=control.type==='checkbox'?control.checked:control.value;if(['numberInput','slider'].includes(c.type)&&value!=='')value=Number(value);state.testValues[id]=value;log(`${c.name} changed to ${String(value)}`,'good');await runEvent('change',id,{pageId:state.currentPageId});render();};
+    if(c.type==='slider')control.oninput=()=>{state.testValues[id]=Number(control.value);const valueEl=host.querySelector('.slider-value');if(valueEl)valueEl.textContent=control.value;};
   });
 }
-function navigateTest(pageId,push=true){
+async function navigateTest(pageId,push=true){
   if(!state.project.pages.some(p=>p.id===pageId)||pageId===state.currentPageId)return;
   if(push&&state.currentPageId)state.pageHistory.push(state.currentPageId);
-  state.currentPageId=pageId;state.selectedComponent=null;log(`${pageName(pageId)} opened`,'good');runEvent('open',null,{pageId});
+  state.currentPageId=pageId;state.selectedComponent=null;log(`${pageName(pageId)} opened`,'good');await runEvent('open',null,{pageId});
 }
-function goBackTest(){const prev=state.pageHistory.pop();if(prev)navigateTest(prev,false);}
-function runEvent(kind,component=null,meta={}){
+async function goBackTest(){const prev=state.pageHistory.pop();if(prev)await navigateTest(prev,false);}
+function runtimeRows(){return state.testRecords||[];}
+function parseLiteral(value){const text=String(value??'').trim();if(/^[-+]?\d+(\.\d+)?$/.test(text))return Number(text);if(/^true$/i.test(text))return true;if(/^false$/i.test(text))return false;return value??'';}
+function compareRuntime(actual,operator,expected){
+  const right=parseLiteral(expected);let left=actual;
+  if(typeof right==='number'&&left!==''&&!Number.isNaN(Number(left)))left=Number(left);
+  if(operator==='eq')return String(left)===String(right);
+  if(operator==='neq')return String(left)!==String(right);
+  if(operator==='contains')return String(left).toLowerCase().includes(String(right).toLowerCase());
+  if(operator==='gt')return Number(left)>Number(right);
+  if(operator==='lt')return Number(left)<Number(right);
+  if(operator==='gte')return Number(left)>=Number(right);
+  if(operator==='lte')return Number(left)<=Number(right);
+  return false;
+}
+function formValueForField(value,field){
+  if(!field)return value;
+  if(field.type==='number')return Number(value)||0;
+  if(field.type==='rating')return Math.max(0,Math.min(10,Math.round(Number(value)||0)));
+  if(field.type==='boolean')return value===true||String(value).toLowerCase()==='true'||String(value)==='1';
+  return String(value??'');
+}
+function applyFormInputs(record){
+  for(const c of state.project.components||[]){
+    if(!interactiveComponentType(c.type)||!c.dataField||(c.pageId||state.project.pages[0]?.id)!==state.currentPageId)continue;
+    const field=state.project.fields.find(f=>f.id===c.dataField);if(!field)continue;
+    record[field.id]=formValueForField(state.testValues[c.id],field);
+  }
+}
+function fillAutomaticId(record,rows){
+  const first=state.project.fields[0];if(!first)return;
+  const mapped=state.project.components.some(c=>interactiveComponentType(c.type)&&c.dataField===first.id&&(c.pageId||state.project.pages[0]?.id)===state.currentPageId);if(mapped)return;
+  if(first.type==='number')record[first.id]=Math.max(0,...rows.map(r=>Number(r[first.id])||0))+1;
+  else if(/(^|_)id$|\bid\b/i.test(`${first.id} ${first.name||''}`))record[first.id]=String(rows.length+1);
+}
+async function executeActions(actions=[]){
+  for(const b of actions){
+    if(b.type==='first_record'){state.currentRecord=0;log('Moved to first record','good');continue}
+    if(b.type==='next_record'){const rows=runtimeRows();if(rows.length){state.currentRecord=(state.currentRecord+1)%rows.length;log(`Moved to record ${state.currentRecord+1}`,'good')}continue}
+    if(b.type==='prev_record'){const rows=runtimeRows();if(rows.length){state.currentRecord=(state.currentRecord-1+rows.length)%rows.length;log(`Moved to record ${state.currentRecord+1}`,'good')}continue}
+    if(b.type==='set_field'){applyField(b.target,b.field);continue}
+    if(b.type==='set_text'){applyText(b.target,b.text);continue}
+    if(b.type==='set_from_component'){applyRuntimeValueToTarget(b.target,state.testValues[b.source]);continue}
+    if(b.type==='set_visible'){state.testVisibility[b.target]=b.visible!==false;log(`${nameOfComponent(b.target)} ${b.visible===false?'hidden':'shown'}`,'good');continue}
+    if(b.type==='show_message'){alert(String(b.text||''));log(`Message shown: ${b.text||''}`,'good');continue}
+    if(b.type==='if_component'){const ok=compareRuntime(state.testValues[b.source],b.operator,b.value);log(`IF condition was ${ok?'true':'false'}`,ok?'good':'');await executeActions(ok?(b.then||[]):(b.else||[]));continue}
+    if(b.type==='set_variable'){state.testVariables[b.name||'score']=parseLiteral(b.value);log(`${b.name||'score'} = ${String(state.testVariables[b.name||'score'])}`,'good');continue}
+    if(b.type==='change_variable'){const name=b.name||'score';state.testVariables[name]=(Number(state.testVariables[name])||0)+(Number(b.amount)||0);log(`${name} = ${state.testVariables[name]}`,'good');continue}
+    if(b.type==='set_from_variable'){applyRuntimeValueToTarget(b.target,state.testVariables[b.name||'score']??0);continue}
+    if(b.type==='api_request'){const q=state.testValues[b.source];log(`Sending request to ${apiServiceInfo(state.project.apiService).name}…`,'good');try{state.testApiResult=await fetchApiData(state.project.apiService,q);state.testApiSuccess=true;state.testApiError='';log('API replied with JSON data','good')}catch(err){state.testApiResult={};state.testApiSuccess=false;state.testApiError=err.message||'API request failed';log(`API request failed: ${state.testApiError}`,'warn')}continue}
+    if(b.type==='set_from_api'){applyRuntimeValueToTarget(b.target,state.testApiResult?.[b.field]??'');log(`${nameOfComponent(b.target)} ← API result ${b.field}`,'good');continue}
+    if(b.type==='if_api_success'){await executeActions(state.testApiSuccess?(b.then||[]):(b.else||[]));continue}
+    if(b.type==='add_record_form'){const row={};state.project.fields.forEach(f=>row[f.id]=defaultValueForType(f.type));applyFormInputs(row);fillAutomaticId(row,runtimeRows());runtimeRows().push(row);state.currentRecord=runtimeRows().length-1;log(`Added record ${runtimeRows().length}`,'good');continue}
+    if(b.type==='update_record_form'){const row=runtimeRows()[state.currentRecord];if(row){applyFormInputs(row);log(`Updated selected record ${state.currentRecord+1}`,'good')}continue}
+    if(b.type==='delete_record'){const rows=runtimeRows();if(rows.length){rows.splice(state.currentRecord,1);state.currentRecord=Math.max(0,Math.min(state.currentRecord,rows.length-1));log('Deleted selected record','warn')}continue}
+    if(b.type==='navigate_page'){await navigateTest(b.page,true);continue}
+    if(b.type==='go_back'){await goBackTest();continue}
+  }
+}
+async function runEvent(kind,component=null,meta={}){
   let active=false;
-  for(const b of state.project.program){
+  for(const b of state.project.program||[]){
     if(b.type==='event_open'){active=kind==='open'&&(b.page||state.project.pages[0]?.id)===(meta.pageId||state.currentPageId);continue}
     if(b.type==='event_click'){active=kind==='click'&&b.component===component;continue}
     if(b.type==='event_list_click'){active=kind==='list_click'&&b.component===component;continue}
+    if(b.type==='event_change'){active=kind==='change'&&b.component===component;continue}
     if(!active)continue;
-    if(b.type==='first_record'){state.currentRecord=0;log('Moved to first record','good')}
-    if(b.type==='next_record'){if(state.project.records.length){state.currentRecord=(state.currentRecord+1)%state.project.records.length;log(`Moved to record ${state.currentRecord+1}`,'good')}}
-    if(b.type==='prev_record'){if(state.project.records.length){state.currentRecord=(state.currentRecord-1+state.project.records.length)%state.project.records.length;log(`Moved to record ${state.currentRecord+1}`,'good')}}
-    if(b.type==='set_field')applyField(b.target,b.field);
-    if(b.type==='set_text')applyText(b.target,b.text);
-    if(b.type==='navigate_page')navigateTest(b.page,true);
-    if(b.type==='go_back')goBackTest();
+    await executeActions([b]);
   }
 }
 function applyField(targetId,fieldId){
-  const c=state.project.components.find(x=>x.id===targetId), f=state.project.fields.find(x=>x.id===fieldId), r=state.project.records[state.currentRecord];
+  const c=state.project.components.find(x=>x.id===targetId), f=state.project.fields.find(x=>x.id===fieldId), r=runtimeRows()[state.currentRecord];
   if(!c||!f||!r){log('A block is missing a component or field.','warn');return}
   const value=r[fieldId]??'';
-  if(c.type==='image') c.src=String(value); else if(c.type!=='list') c.text=f.type==='rating'?ratingStars(value):String(value);
+  if(interactiveComponentType(c.type))state.testValues[c.id]=value; else if(c.type!=='list')state.testDisplayValues[c.id]=c.type==='image'?String(value):(f.type==='rating'?ratingStars(value):String(value));
   log(`${c.name} ← ${f.name} from selected record`,'good');
 }
-function applyText(targetId,text){const c=state.project.components.find(x=>x.id===targetId);if(!c){log('A text block is missing its component.','warn');return}if(c.type!=='image'&&c.type!=='list')c.text=String(text||'');log(`${c.name} text updated`,'good')}
+function applyRuntimeValueToTarget(targetId,value){
+  const c=state.project.components.find(x=>x.id===targetId);if(!c){log('A block is missing its target component.','warn');return}
+  if(interactiveComponentType(c.type))state.testValues[c.id]=value;else if(c.type!=='list')state.testDisplayValues[c.id]=String(value??'');
+  log(`${c.name} updated`,'good');
+}
+function applyText(targetId,text){applyRuntimeValueToTarget(targetId,text)}
+
 function log(text,kind=''){state.testLogs.push({text,kind});if(state.testLogs.length>18)state.testLogs.shift()}
 
 function eventPageId(event){
   if(event.type==='event_open')return event.page||state.project.pages[0]?.id;
-  if(['event_click','event_list_click'].includes(event.type))return state.project.components.find(c=>c.id===event.component)?.pageId||state.project.pages[0]?.id;
+  if(['event_click','event_list_click','event_change'].includes(event.type))return state.project.components.find(c=>c.id===event.component)?.pageId||state.project.pages[0]?.id;
   return '';
 }
 function programForPage(pageId){
   const out=[];let include=false;
   for(const b of state.project.program||[]){
-    if(['event_open','event_click','event_list_click'].includes(b.type))include=eventPageId(b)===pageId;
+    if(['event_open','event_click','event_list_click','event_change'].includes(b.type))include=eventPageId(b)===pageId;
     if(include)out.push(b);
   }
   return out;
@@ -1314,43 +1620,92 @@ function programForPage(pageId){
 function replaceProgramForPage(pageId,pageProgram){
   const kept=[];let include=false;
   for(const b of state.project.program||[]){
-    if(['event_open','event_click','event_list_click'].includes(b.type))include=eventPageId(b)===pageId;
+    if(['event_open','event_click','event_list_click','event_change'].includes(b.type))include=eventPageId(b)===pageId;
     if(!include)kept.push(b);
   }
   state.project.program=[...kept,...pageProgram];
 }
-function generateCode(){
-  const visibleProgram=programForPage(state.currentPageId);
-  if(state.codeMode==='plain'){
-    return visibleProgram.map(b=>{
-      if(b.type==='event_open')return `WHEN ${pageName(b.page||state.project.pages[0]?.id)} opens:`;
-      if(b.type==='event_click')return `WHEN ${nameOfComponent(b.component)} is clicked:`;
-      if(b.type==='event_list_click')return `WHEN an item in ${nameOfComponent(b.component)} is tapped:  (that row becomes the selected record)`;
-      if(b.type==='first_record')return '    Move to the first database record';
-      if(b.type==='next_record')return '    Move to the next database record';
-      if(b.type==='prev_record')return '    Move to the previous database record';
-      if(b.type==='set_field')return `    Put ${nameOfField(b.field)} into ${nameOfComponent(b.target)}`;
-      if(b.type==='set_text')return `    Set ${nameOfComponent(b.target)} text to \"${b.text||''}\"`;
-      if(b.type==='navigate_page')return `    Go to ${pageName(b.page)}`;
-      if(b.type==='go_back')return '    Go back to the previous page';
-      return '';
-    }).filter(Boolean).join('\n');
+function plainActionLines(b,indent='    '){
+  if(b.type==='first_record')return [`${indent}Move to the first database record`];
+  if(b.type==='next_record')return [`${indent}Move to the next database record`];
+  if(b.type==='prev_record')return [`${indent}Move to the previous database record`];
+  if(b.type==='set_field')return [`${indent}Put ${nameOfField(b.field)} into ${nameOfComponent(b.target)}`];
+  if(b.type==='set_text')return [`${indent}Set ${nameOfComponent(b.target)} text to "${b.text||''}"`];
+  if(b.type==='set_from_component')return [`${indent}Set ${nameOfComponent(b.target)} to the value of ${nameOfComponent(b.source)}`];
+  if(b.type==='set_visible')return [`${indent}${b.visible===false?'Hide':'Show'} ${nameOfComponent(b.target)}`];
+  if(b.type==='show_message')return [`${indent}Show message "${b.text||''}"`];
+  if(b.type==='if_component'){
+    const line=`${indent}IF ${nameOfComponent(b.source)} ${operatorLabel(b.operator)} "${b.value??''}"`;
+    return [line,...(b.then||[]).flatMap(x=>plainActionLines(x,indent+'    ')),`${indent}ELSE`,...(b.else||[]).flatMap(x=>plainActionLines(x,indent+'    '))];
   }
-  const out=[];
-  visibleProgram.forEach(b=>{
-    if(b.type==='event_open')out.push(`def ${safeName(pageName(b.page||state.project.pages[0]?.id))}_opened():`);
-    if(b.type==='event_click')out.push(`\ndef ${safeName(nameOfComponent(b.component))}_clicked():`);
-    if(b.type==='event_list_click')out.push(`\ndef ${safeName(nameOfComponent(b.component))}_item_tapped(clicked_record):\n    record = clicked_record`);
-    if(b.type==='first_record')out.push('    record = database.first_record()');
-    if(b.type==='next_record')out.push('    record = database.next_record()');
-    if(b.type==='prev_record')out.push('    record = database.previous_record()');
-    if(b.type==='set_field')out.push(`    ${safeName(nameOfComponent(b.target))}.value = record["${nameOfField(b.field)}"]`);
-    if(b.type==='set_text')out.push(`    ${safeName(nameOfComponent(b.target))}.value = ${JSON.stringify(b.text||'')}`);
-    if(b.type==='navigate_page')out.push(`    app.go_to("${pageName(b.page)}")`);
-    if(b.type==='go_back')out.push('    app.go_back()');
-  });
-  return out.join('\n')||'# Add some blocks to see the code idea here.';
+  if(b.type==='set_variable')return [`${indent}Set variable ${b.name||'score'} to ${b.value??0}`];
+  if(b.type==='change_variable')return [`${indent}Change variable ${b.name||'score'} by ${b.amount??0}`];
+  if(b.type==='set_from_variable')return [`${indent}Set ${nameOfComponent(b.target)} to variable ${b.name||'score'}`];
+  if(b.type==='api_request')return [`${indent}Ask ${apiServiceInfo(state.project.apiService).name} using ${nameOfComponent(b.source)}`];
+  if(b.type==='set_from_api')return [`${indent}Set ${nameOfComponent(b.target)} to API result ${b.field}`];
+  if(b.type==='if_api_success')return [`${indent}IF the last API request worked`,...(b.then||[]).flatMap(x=>plainActionLines(x,indent+'    ')),`${indent}ELSE`,...(b.else||[]).flatMap(x=>plainActionLines(x,indent+'    '))];
+  if(b.type==='add_record_form')return [`${indent}Add a new database record from the mapped form inputs`];
+  if(b.type==='update_record_form')return [`${indent}Update the selected record from the mapped form inputs`];
+  if(b.type==='delete_record')return [`${indent}Delete the selected database record`];
+  if(b.type==='navigate_page')return [`${indent}Go to ${pageName(b.page)}`];
+  if(b.type==='go_back')return [`${indent}Go back to the previous page`];
+  return [];
 }
+function operatorLabel(op){return ({eq:'=',neq:'≠',gt:'>',lt:'<',gte:'≥',lte:'≤',contains:'contains'})[op]||'=';}
+function pythonActionLines(b,indent='    '){
+  const target=safeName(nameOfComponent(b.target||'')),source=safeName(nameOfComponent(b.source||''));
+  if(b.type==='first_record')return [`${indent}record = database.first_record()`];
+  if(b.type==='next_record')return [`${indent}record = database.next_record()`];
+  if(b.type==='prev_record')return [`${indent}record = database.previous_record()`];
+  if(b.type==='set_field')return [`${indent}${target}.value = record[${JSON.stringify(nameOfField(b.field))}]`];
+  if(b.type==='set_text')return [`${indent}${target}.value = ${JSON.stringify(b.text||'')}`];
+  if(b.type==='set_from_component')return [`${indent}${target}.value = ${source}.value`];
+  if(b.type==='set_visible')return [`${indent}${target}.visible = ${b.visible===false?'False':'True'}`];
+  if(b.type==='show_message')return [`${indent}app.show_message(${JSON.stringify(b.text||'')})`];
+  if(b.type==='if_component'){
+    const pyop=({eq:'==',neq:'!=',gt:'>',lt:'<',gte:'>=',lte:'<=',contains:'in'})[b.operator]||'==';
+    const cond=b.operator==='contains'?`${JSON.stringify(String(b.value??''))} ${pyop} str(${source}.value)`:`${source}.value ${pyop} ${JSON.stringify(String(b.value??''))}`;
+    const thenLines=(b.then||[]).flatMap(x=>pythonActionLines(x,indent+'    '));const elseLines=(b.else||[]).flatMap(x=>pythonActionLines(x,indent+'    '));
+    return [`${indent}if ${cond}:`,...(thenLines.length?thenLines:[`${indent}    pass`]),`${indent}else:`,...(elseLines.length?elseLines:[`${indent}    pass`])];
+  }
+  if(b.type==='set_variable')return [`${indent}${safeName(b.name||'score')} = ${JSON.stringify(parseLiteral(b.value))}`];
+  if(b.type==='change_variable')return [`${indent}${safeName(b.name||'score')} += ${Number(b.amount)||0}`];
+  if(b.type==='set_from_variable')return [`${indent}${target}.value = ${safeName(b.name||'score')}`];
+  if(b.type==='api_request')return [`${indent}api_result = await api.request(${JSON.stringify(state.project.apiService)}, ${source}.value)`];
+  if(b.type==='set_from_api')return [`${indent}${target}.value = api_result.get(${JSON.stringify(b.field)}, '')`];
+  if(b.type==='if_api_success'){const thenLines=(b.then||[]).flatMap(x=>pythonActionLines(x,indent+'    '));const elseLines=(b.else||[]).flatMap(x=>pythonActionLines(x,indent+'    '));return [`${indent}if api_request_worked:`,...(thenLines.length?thenLines:[`${indent}    pass`]),`${indent}else:`,...(elseLines.length?elseLines:[`${indent}    pass`])];}
+  if(b.type==='add_record_form')return [`${indent}database.add_record(form_values())`];
+  if(b.type==='update_record_form')return [`${indent}database.update_record(record, form_values())`];
+  if(b.type==='delete_record')return [`${indent}database.delete_record(record)`];
+  if(b.type==='navigate_page')return [`${indent}app.go_to(${JSON.stringify(pageName(b.page))})`];
+  if(b.type==='go_back')return [`${indent}app.go_back()`];
+  return [];
+}
+function generateCode(){
+  const visibleProgram=programForPage(state.currentPageId),lines=[];let inEvent=false;
+  for(const b of visibleProgram){
+    if(['event_open','event_click','event_list_click','event_change'].includes(b.type)){
+      inEvent=true;
+      if(state.codeMode==='plain'){
+        if(b.type==='event_open')lines.push(`WHEN ${pageName(b.page||state.project.pages[0]?.id)} opens:`);
+        if(b.type==='event_click')lines.push(`WHEN ${nameOfComponent(b.component)} is clicked:`);
+        if(b.type==='event_list_click')lines.push(`WHEN an item in ${nameOfComponent(b.component)} is tapped:`);
+        if(b.type==='event_change')lines.push(`WHEN ${nameOfComponent(b.component)} changes:`);
+      }else{
+        if(lines.length)lines.push('');
+        if(b.type==='event_open')lines.push(`def ${safeName(pageName(b.page||state.project.pages[0]?.id))}_opened():`);
+        if(b.type==='event_click')lines.push(`def ${safeName(nameOfComponent(b.component))}_clicked():`);
+        if(b.type==='event_list_click')lines.push(`def ${safeName(nameOfComponent(b.component))}_item_tapped(clicked_record):`,`    record = clicked_record`);
+        if(b.type==='event_change')lines.push(`def ${safeName(nameOfComponent(b.component))}_changed():`);
+      }
+      continue;
+    }
+    if(!inEvent)continue;
+    lines.push(...(state.codeMode==='plain'?plainActionLines(b):pythonActionLines(b)));
+  }
+  return lines.join('\n')||(state.codeMode==='plain'?'Add some blocks to see the program here.':'# Add some blocks to see the code idea here.');
+}
+
 function nameOfComponent(id){return state.project.components.find(c=>c.id===id)?.name||'component'}
 function nameOfField(id){return state.project.fields.find(f=>f.id===id)?.name||'field'}
 function safeName(s){return String(s).replace(/\W+/g,'_').replace(/^\d/,'_$&')}

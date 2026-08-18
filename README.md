@@ -1,8 +1,6 @@
-# DataApp Studio — classroom V1.18
+# DataApp Studio — classroom V1.21
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.18 adds administrator-controlled teacher invitations on top of the multi-app classroom, database, Blockly and Android publishing workflow.
-
-
+A child-friendly database + app builder aimed at roughly age 12–13. V1.21 adds guided project briefs for every capability level and a new Level 5 Connected App workspace for real, curated web APIs.
 
 
 
@@ -10,6 +8,46 @@ A child-friendly database + app builder aimed at roughly age 12–13. V1.18 adds
 
 
 
+
+
+
+
+
+
+## New in V1.21
+
+- Every capability level now has a built-in **project brief** with a real app purpose, user journey, skills and success criteria. The brief remains visible even when pupils choose checklist-only support.
+- **Level 2 — Pet Match** is deliberately framed as a recommendation app: pupils collect user choices with inputs and make meaningful recommendations with IF / ELSE rather than completing an abstract programming exercise.
+- Teachers see the recommended project when choosing a capability level. The assignment title follows the recommended brief unless the teacher has typed their own title, and teachers can add class-specific instructions.
+- **Level 5 — Connected App** unlocks a new **Connect** workspace and **Web / API** Blockly category. Earlier projects do not see any API tools.
+- Level 5 includes three curated no-secret connectors: **Live Weather (Open-Meteo)**, **Book Search (Open Library)** and **Pokédex (PokéAPI)**.
+- The Connect workspace includes a real request tester, friendly result fields and an expandable JSON view so pupils can see the request → API → JSON → app flow before coding it.
+- New Blockly actions: **ask selected API using [input]**, **set [component] to API result [field]**, and **if last API request worked**. API image URLs can be sent directly to an Image component.
+- API requests work in Test and in published/installed apps. Failed requests can be handled with an ELSE branch. No private API keys are stored in pupil projects or published apps.
+- Level 5 keeps all Level 1–4 tools; it only adds the Connected App layer.
+- No Firestore or Storage rule changes are required for V1.21.
+
+## New in V1.20
+
+- **Progressive capability levels** are stored per assignment/project. Existing projects and old assignments default to **Level 1**, so pupils are not suddenly shown new tools.
+- **Level 1 — Database Explorer:** the existing two-page List → Details workflow only.
+- **Level 2 — Interactive App:** unlocks Text Input, Number Input, Dropdown, Switch and Slider components; Blockly adds input-change events, IF / ELSE comparisons, messages, show/hide and copying an input value to a screen component.
+- **Level 3 — Data Creator:** unlocks add/update/delete record blocks. Inputs can be mapped to database fields in Design, so one block can save a form. Test mode changes a temporary copy only; published apps persist user-created records locally on that device/browser.
+- **Level 4 — Smart App:** unlocks simple variables, counters and displaying variable values.
+- Teachers choose the capability level when creating an assignment. Pupils only see components and Blockly categories allowed for that project.
+- Guided tutorial/checklist content changes with the project capability level.
+- No Firestore or Storage rule changes are required for V1.20.
+
+## New in V1.19
+
+- Publish is now described as **Install on phone** rather than Android-only.
+- One QR/app link works for Android, iPhone and iPad.
+- The pupil Publish screen shows separate Android and iPhone/iPad install instructions.
+- Published apps detect iPhone/iPad and show **Add to Home Screen** guidance instead of an Android install message.
+- Android still uses the native browser install prompt when available.
+- Installed/standalone apps hide the install button.
+- The chosen pupil icon is also exposed as an Apple touch icon for iPhone/iPad Home Screen installation.
+- No Firebase rules change is required from V1.18.
 
 ## New in V1.18
 
@@ -146,7 +184,7 @@ See `UPDATE-V1.8.md` when upgrading an already connected V1.7 site.
 5. **DESIGN** — add labels, images, buttons, text boxes and lists.
 6. **BLOCKS** — use a deliberately small Scratch-like visual programming set.
 7. **TEST** — run the app and use the friendly debugger.
-8. **PUBLISH** — choose the installed-app name/icon, publish an unlisted snapshot, scan its QR code and install it on Android.
+8. **PUBLISH** — choose the installed-app name/icon, publish an unlisted snapshot, scan its QR code and install it on Android, iPhone or iPad.
 
 ## Teacher workflow
 

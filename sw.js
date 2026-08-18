@@ -1,5 +1,5 @@
-const CACHE='dataapp-published-v1-15';
-const SHELL=['./published.html','./published.css','./public-app.js','./firebase-config.js'];
+const CACHE='dataapp-published-v1-21';
+const SHELL=['./published.html','./published.css','./public-app.js','./api-connectors.js','./firebase-config.js'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).catch(()=>{}));self.skipWaiting();});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{for(const k of await caches.keys())if(k!==CACHE)await caches.delete(k);await self.clients.claim();})());});
 self.addEventListener('fetch',event=>{

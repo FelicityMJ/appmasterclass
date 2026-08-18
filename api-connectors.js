@@ -1,0 +1,118 @@
+export const API_CATALOG = {
+  weather: {
+    id:'weather',
+    name:'Live Weather',
+    emoji:'🌦️',
+    provider:'Open-Meteo',
+    queryLabel:'Town or city',
+    placeholder:'e.g. Glasgow',
+    description:'Search a place and use live weather data in your app.',
+    fields:[
+      ['place','Place'],['country','Country'],['temperature','Temperature °C'],['feelsLike','Feels like °C'],['conditions','Conditions'],['windSpeed','Wind speed km/h']
+    ]
+  },
+  books: {
+    id:'books',
+    name:'Book Search',
+    emoji:'📚',
+    provider:'Open Library',
+    queryLabel:'Book, author or topic',
+    placeholder:'e.g. Harry Potter',
+    description:'Search Open Library and use the first matching book result.',
+    fields:[
+      ['title','Book title'],['author','Author'],['year','First published'],['coverUrl','Cover image URL']
+    ]
+  },
+  pokemon: {
+    id:'pokemon',
+    name:'Pokédex',
+    emoji:'⚡',
+    provider:'PokéAPI',
+    queryLabel:'Pokémon name or number',
+    placeholder:'e.g. pikachu',
+    description:'Look up a Pokémon by its name or Pokédex number.',
+    fields:[
+      ['name','Name'],['number','Pokédex number'],['types','Type(s)'],['heightM','Height (m)'],['weightKg','Weight (kg)'],['imageUrl','Artwork image URL']
+    ]
+  }
+};
+
+export function apiServiceInfo(id){return API_CATALOG[id]||API_CATALOG.weather;}
+export function apiFieldOptions(id){return apiServiceInfo(id).fields.map(([value,label])=>[label,value]);}
+
+function titleCase(text){return String(text||'').replace(/(^|[-\s])\w/g,m=>m.toUpperCase());}
+function weatherDescription(code){
+  const n=Number(code);
+  if(n===0)return 'Clear sky';
+  if([1,2].includes(n))return 'Partly cloudy';
+  if(n===3)return 'Overcast';
+  if([45,48].includes(n))return 'Fog';
+  if([51,53,55,56,57].includes(n))return 'Drizzle';
+  if([61,63,65,66,67].includes(n))return 'Rain';
+  if([71,73,75,77].includes(n))return 'Snow';
+  if([80,81,82].includes(n))return 'Rain showers';
+  if([85,86].includes(n))return 'Snow showers';
+  if([95,96,99].includes(n))return 'Thunderstorm';
+  return 'Weather unavailable';
+}
+async function fetchJson(url, timeoutMs=10000){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{
+    const response=await fetch(url,{signal:controller.signal,headers:{Accept:'application/json'}});
+    if(!response.ok)throw new Error(`The service replied with ${response.status}.`);
+    return await response.json();
+  }catch(err){
+    if(err?.name==='AbortError')throw new Error('The API took too long to respond.');
+    throw err;
+  }finally{clearTimeout(timer)}
+}
+async function weatherLookup(query){
+  const geo=await fetchJson(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=en&format=json`);
+  const place=geo?.results?.[0];
+  if(!place)throw new Error('No matching place was found. Try a town or city name.');
+  const data=await fetchJson(`https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(place.latitude)}&longitude=${encodeURIComponent(place.longitude)}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&timezone=auto`);
+  const current=data?.current;
+  if(!current)throw new Error('Weather data was not available for that place.');
+  return {
+    place:place.name||query,
+    country:place.country||'',
+    temperature:Number(current.temperature_2m),
+    feelsLike:Number(current.apparent_temperature),
+    conditions:weatherDescription(current.weather_code),
+    windSpeed:Number(current.wind_speed_10m)
+  };
+}
+async function bookLookup(query){
+  const data=await fetchJson(`https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=1&fields=title,author_name,first_publish_year,cover_i,key`);
+  const book=data?.docs?.[0];
+  if(!book)throw new Error('No matching book was found. Try another title, author or topic.');
+  return {
+    title:book.title||'Untitled',
+    author:Array.isArray(book.author_name)?book.author_name.slice(0,3).join(', '):(book.author_name||'Unknown'),
+    year:book.first_publish_year??'',
+    coverUrl:book.cover_i?`https://covers.openlibrary.org/b/id/${book.cover_i}-M.jpg`:''
+  };
+}
+async function pokemonLookup(query){
+  const cleaned=String(query).trim().toLowerCase().replace(/\s+/g,'-');
+  let data;
+  try{data=await fetchJson(`https://pokeapi.co/api/v2/pokemon/${encodeURIComponent(cleaned)}/`)}catch(err){if(String(err?.message||'').includes('404'))throw new Error('No matching Pokémon was found. Try its name or Pokédex number.');throw err}
+  if(!data?.name)throw new Error('No matching Pokémon was found.');
+  return {
+    name:titleCase(data.name),
+    number:data.id??'',
+    types:(data.types||[]).map(x=>titleCase(x?.type?.name)).filter(Boolean).join(', '),
+    heightM:Math.round((Number(data.height)||0)*10)/100,
+    weightKg:Math.round((Number(data.weight)||0))/10,
+    imageUrl:data.sprites?.other?.['official-artwork']?.front_default||data.sprites?.front_default||''
+  };
+}
+
+export async function fetchApiData(serviceId, query){
+  const q=String(query??'').trim();
+  if(!q)throw new Error('Enter something to search for first.');
+  if(serviceId==='books')return bookLookup(q);
+  if(serviceId==='pokemon')return pokemonLookup(q);
+  return weatherLookup(q);
+}
