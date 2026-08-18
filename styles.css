@@ -204,3 +204,11 @@ button{cursor:pointer}
 @media(max-width:850px){.brief-columns,.api-workbench{grid-template-columns:1fr}.api-library{grid-template-columns:1fr}.api-friendly-result>div{grid-template-columns:110px 1fr}}
 .brief-journey{margin:12px 0;padding:12px 14px;background:#fff9ec;border:1px solid #f2dfb6;border-radius:12px}.brief-journey h4{margin:0 0 7px}.brief-journey ol{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;counter-reset:journey;list-style:none;padding:0;margin:0}.brief-journey li{counter-increment:journey;background:#fff;border:1px solid #eee3c8;border-radius:9px;padding:9px;font-size:13px;line-height:1.35}.brief-journey li:before{content:counter(journey);display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#f2c96d;margin-right:6px;font-weight:800}@media(max-width:850px){.brief-journey ol{grid-template-columns:1fr 1fr}}
 .api-test-inspector .mini-json{margin:0;max-height:240px;overflow:auto;white-space:pre-wrap;background:#10151d;color:#dfeee5;border-radius:10px;padding:10px;font-size:11px;line-height:1.45}
+
+
+/* V1.22 — scrollable long modals */
+.modal-backdrop{overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.modal{max-height:calc(100vh - 40px);max-height:calc(100dvh - 40px);overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;-webkit-overflow-scrolling:touch}
+.modal textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;padding:10px;font:inherit;resize:vertical;min-height:84px}
+.capability-modal .modal-actions{position:sticky;bottom:-20px;z-index:5;background:#fff;padding:12px 0 2px;box-shadow:0 -12px 22px rgba(255,255,255,.94)}
+@media(max-width:620px){.modal-backdrop{padding:10px}.modal{max-height:calc(100vh - 20px);max-height:calc(100dvh - 20px)}.capability-modal .modal-actions{bottom:-20px}}

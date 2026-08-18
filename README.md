@@ -1,8 +1,6 @@
-# DataApp Studio — classroom V1.21
+# DataApp Studio — classroom V1.22
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.21 adds guided project briefs for every capability level and a new Level 5 Connected App workspace for real, curated web APIs.
-
-
+A child-friendly database + app builder aimed at roughly age 12–13. V1.22 keeps the V1.21 project/API pathway and fixes long teacher dialogs so assignment creation remains fully scrollable on smaller screens.
 
 
 
@@ -13,6 +11,17 @@ A child-friendly database + app builder aimed at roughly age 12–13. V1.21 adds
 
 
 
+
+
+
+
+## New in V1.22
+
+- long dialogs such as **Create an assignment** now scroll inside the modal when they are taller than the browser window;
+- the page behind the modal stays fixed;
+- the assignment action buttons remain reachable at the bottom while scrolling;
+- the optional teacher instructions box now uses the full modal width and can be resized vertically;
+- no Firebase rule changes are required.
 
 ## New in V1.21
 
