@@ -33,9 +33,12 @@ function isStandaloneMode() {
   return window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
 }
 function installButtonLabel() {
-  if (isIOSDevice()) return 'Add to Home Screen';
+  if (isIOSDevice()) return 'How to install';
   if (deferredInstallPrompt) return 'Install app';
   return 'Install on phone';
+}
+function shareButtonLabel() {
+  return isIOSDevice() ? 'Share link' : 'Share';
 }
 
 window.addEventListener('beforeinstallprompt', event => {
@@ -205,7 +208,14 @@ function usePublishedData(data, {resetRuntime=true} = {}) {
     currentRecord = 0;
     pageHistory = [];
     runtimeRecords = loadRuntimeRecords() || cloneData(project.records || []);
-    runtimeValues = {}; runtimeVisibility = {}; runtimeVariables = {}; runtimeApiResult = {}; runtimeApiRows = []; runtimeApiSuccess = false; runtimeApiError = '';
+    runtimeValues = {}; runtimeVisibility = {}; runtimeVariables = {};
+    // Seed a published Connected App with the pupil's last successful Connect result.
+    // This keeps API Lists/details populated immediately on iPhone/Android installs instead of starting blank.
+    runtimeApiRows = cloneData(Array.isArray(project.apiLastRows) ? project.apiLastRows : []);
+    runtimeApiResult = cloneData(project.apiLastResult && typeof project.apiLastResult === 'object' ? project.apiLastResult : (runtimeApiRows[0] || {}));
+    if ((!runtimeApiResult || !Object.keys(runtimeApiResult).length) && runtimeApiRows.length) runtimeApiResult = cloneData(runtimeApiRows[0]);
+    runtimeApiSuccess = runtimeApiRows.length > 0 || Object.keys(runtimeApiResult || {}).length > 0;
+    runtimeApiError = '';
     for (const component of project.components || []) {
       runtimeVisibility[component.id] = component.visible !== false;
       if (interactiveComponentType(component.type)) runtimeValues[component.id] = initialInteractiveValue(component);
@@ -273,7 +283,7 @@ function render() {
   root.innerHTML = `<div class="public-shell" style="background:${attr(pageBackground)}">
     <header class="public-topbar">
       <div class="public-brand"><img src="${attr(published.icon192 || published.icon512 || '')}" alt=""><span>${esc(published.appName || project.name)}</span></div>
-      <div class="public-actions"><button class="public-btn" data-share>Share</button>${isStandaloneMode()?'':`<button class="public-btn primary" data-install>${esc(installButtonLabel())}</button>`}</div>
+      <div class="public-actions"><button class="public-btn" data-share>${esc(shareButtonLabel())}</button>${isStandaloneMode()?'':`<button class="public-btn primary" data-install>${esc(installButtonLabel())}</button>`}</div>
     </header>
     <section class="public-stage" style="background:${attr(pageBackground)}">
       <div class="public-canvas-wrap" data-canvas-wrap>
@@ -425,8 +435,8 @@ function showInstallHelp() {
   box.className = 'install-help';
   const ios = isIOSDevice();
   box.innerHTML = ios
-    ? '<button aria-label="Close">×</button><strong>Add this app to iPhone or iPad</strong><p>Open this link in <b>Safari</b>, tap the <b>Share</b> button, choose <b>Add to Home Screen</b>, then tap <b>Add</b>. If your iPhone shows <b>Open as Web App</b>, leave it switched on. The Home Screen icon will use the image chosen by the app creator.</p>'
-    : '<button aria-label="Close">×</button><strong>Install this app on your phone</strong><p>On Android, open the browser menu and choose <b>Install app</b> or <b>Add to Home screen</b>. On iPhone/iPad, open the link in <b>Safari</b>, tap <b>Share</b>, then <b>Add to Home Screen</b>.</p>';
+    ? '<button aria-label="Close">×</button><strong>Install on iPhone or iPad</strong><p class="install-note"><b>Important:</b> use Safari’s own browser controls, not the <b>Share link</b> button at the top of this app.</p><ol><li>Open this page in <b>Safari</b>.</li><li>Tap Safari’s <b>More (•••)</b> or <b>Share</b> control in the browser toolbar, then choose <b>Share</b> if needed.</li><li>Scroll down and tap <b>Add to Home Screen</b>.</li><li>If <b>Add to Home Screen</b> is missing, tap <b>Edit Actions…</b>, add <b>Add to Home Screen</b>, then return to the Share menu.</li><li>Leave <b>Open as Web App</b> switched on, then tap <b>Add</b>.</li></ol><p>The Home Screen icon will use the image chosen by the app creator.</p>'
+    : '<button aria-label="Close">×</button><strong>Install this app on your phone</strong><p>On Android, open the browser menu and choose <b>Install app</b> or <b>Add to Home screen</b>. On iPhone/iPad, open the link in Safari and use Safari’s own browser Share/More control, then choose <b>Add to Home Screen</b>.</p>';
   document.body.appendChild(box);
   box.querySelector('button').onclick = () => box.remove();
 }

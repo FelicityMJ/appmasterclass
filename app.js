@@ -387,7 +387,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.26</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.28</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this Google account has not been invited as a teacher yet.</p>
     <div class="notice"><b>Ask your DataApp Studio administrator to invite this exact Google email address.</b><div class="uid-box">${escapeHtml(state.user.email||'')}</div></div>
     <p class="muted">Once the administrator has invited the address, click <b>Check again</b>. The teacher account will be activated automatically; no Firebase UID needs to be copied.</p>
@@ -397,7 +397,7 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.26 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.28 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -954,8 +954,8 @@ function publishView(){
   <div class="notice" style="margin-top:14px">Your app icon is stored separately and <b>does not use one of your 20 personal image slots</b>.</div>
   <button class="btn primary publish-main-btn" data-action="publish-project">${live?'Update published app':'🚀 Publish app'}</button>
   ${live?`<button class="btn small" data-action="unpublish-project" style="margin-top:8px">Unpublish</button>`:''}</section>
-  <section class="card"><h3>${live?'Your phone app is ready':'Install on phone'}</h3><p class="muted">${live?'Scan the same QR code with Android, iPhone or iPad. Android can use the browser install prompt; on iPhone/iPad open the link in Safari and choose Share → Add to Home Screen.':'Choose an icon and press Publish. DataApp Studio will create one unlisted app link and QR code that works on Android, iPhone and iPad.'}</p><div class="publish-phone"><div class="home-icon"><img src="${escapeAttr(pub.icon512||iconSrc)}"><span>${escapeHtml(pub.appName||state.project.name)}</span></div></div>
-  ${live?`<div class="phone-install-guides"><div><b>Android</b><span>Scan QR → open in Chrome → Install app / Add to Home screen.</span></div><div><b>iPhone / iPad</b><span>Scan QR → open in Safari → Share → Add to Home Screen → Add.</span></div></div>`:''}
+  <section class="card"><h3>${live?'Your phone app is ready':'Install on phone'}</h3><p class="muted">${live?'Scan the same QR code with Android, iPhone or iPad. Android can use the browser install prompt. On iPhone/iPad, use Safari’s own browser Share/More control — not the app’s Share link button — then choose Add to Home Screen.':'Choose an icon and press Publish. DataApp Studio will create one unlisted app link and QR code that works on Android, iPhone and iPad.'}</p><div class="publish-phone"><div class="home-icon"><img src="${escapeAttr(pub.icon512||iconSrc)}"><span>${escapeHtml(pub.appName||state.project.name)}</span></div></div>
+  ${live?`<div class="phone-install-guides"><div><b>Android</b><span>Scan QR → open in Chrome → Install app / Add to Home screen.</span></div><div><b>iPhone / iPad</b><span>Scan QR → open in Safari → use Safari’s browser Share/More control → Add to Home Screen. If it is missing, tap Edit Actions and add it first.</span></div></div>`:''}
   ${live?`<div class="publish-result"><div id="publishQr" class="qr-box" aria-label="QR code"></div><div class="share-url">${escapeHtml(shareUrl)}</div><div class="publish-actions"><button class="btn primary" data-action="open-published">Open app</button><button class="btn" data-action="copy-published">Copy link</button></div><div class="notice goodish">The link is a <b>published snapshot</b>. People opening it do not get access to the pupil's editable project or Google account.</div></div>`:
   `<div class="notice warning">Publishing requires Firebase and a signed-in pupil account. Anyone with the QR code or link can open the published app, but they cannot access the pupil's classroom account or editable project.</div>`}</section></div>`;
 }
@@ -992,6 +992,13 @@ async function makeSquareIconDataUrl(src,size,targetBytes){
 }
 function makePublishSnapshot(){
   const snap=clone(state.project);snap.blocklyState=null;delete snap.assignmentId;delete snap.tutorialEnabled;snap.publish={appName:state.project.publish?.appName||state.project.name,theme:state.project.publish?.theme||'#6256df',orientation:state.project.publish?.orientation||'any'};
+  // A Connected App should open with the same successful live result the pupil saw in Connect/Design/Test.
+  // This is seed data only: a later API request in the published app can replace it normally.
+  const publishApiRows=(state.apiPreviewRows&&state.apiPreviewRows.length)?state.apiPreviewRows:(state.project.apiLastRows||[]);
+  const publishApiResult=state.apiPreview||state.project.apiLastResult||(publishApiRows[0]||{});
+  snap.apiLastQuery=state.apiTestQuery||state.project.apiLastQuery||'';
+  snap.apiLastResult=clone(publishApiResult||{});
+  snap.apiLastRows=clone((publishApiRows||[]).slice(0,12));
   const imageFields=new Set((snap.fields||[]).filter(f=>f.type==='image').map(f=>f.id));
   for(const r of snap.records||[])for(const fid of imageFields)if(r[fid])r[fid]=resolveImage(r[fid]);
   for(const c of snap.components||[])if(c.type==='image'&&c.src)c.src=resolveImage(c.src);

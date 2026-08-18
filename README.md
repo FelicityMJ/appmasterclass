@@ -1,8 +1,6 @@
-# DataApp Studio — classroom V1.26
+# DataApp Studio — classroom V1.28
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.26 makes Connected App testing and two-page API List → Details projects much clearer for beginners.
-
-
+A child-friendly database + app builder aimed at roughly age 12–13. V1.28 fixes published Connected Apps so saved API results appear immediately in installed iPhone/Android apps, while retaining the iPhone installation guidance from V1.27.
 
 
 
@@ -15,6 +13,27 @@ A child-friendly database + app builder aimed at roughly age 12–13. V1.26 make
 
 
 
+
+
+
+
+
+## New in V1.28
+
+- published Connected Apps now start with the last successful API result saved from **Connect**;
+- API-backed Lists therefore appear immediately after publishing/installing instead of showing “Search to load live results”;
+- the same saved result also feeds API-bound Labels, Images and detail-page placeholders;
+- a later API request in the app can still replace the starting data normally;
+- publishing explicitly copies the most recent Connect preview into the public snapshot;
+- published-app service-worker cache bumped to V1.28.
+
+## New in V1.27
+
+- iPhone/iPad no longer shows a misleading button labelled **Add to Home Screen**; it now says **How to install** because iOS requires the user to complete the install from Safari's own browser controls.
+- the in-app **Share** button is renamed **Share link** on iPhone/iPad so pupils do not confuse it with Safari's Share control.
+- the iPhone install guide explicitly says to use Safari's browser toolbar and explains the **Edit Actions… → Add to Home Screen** fallback when that action is not currently visible.
+- the teacher Publish screen uses the same clearer iPhone instructions.
+- published-app cache bumped to V1.27.
 
 
 ## New in V1.26
