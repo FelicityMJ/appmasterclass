@@ -34,11 +34,11 @@ export const API_CATALOG = {
     name:'Pokédex',
     emoji:'⚡',
     provider:'PokéAPI',
-    queryLabel:'Pokémon name or number',
-    placeholder:'e.g. pikachu',
-    description:'Look up a Pokémon by its name or Pokédex number.',
-    resultKind:'single',
-    resultHint:'One search gives one Pokémon. Bind its fields straight to Labels or an Image, or show the result as one List row.',
+    queryLabel:'Pokémon name, number or type',
+    placeholder:'e.g. pikachu, electric or all',
+    description:'Find one Pokémon by name/number, or browse several by type.',
+    resultKind:'mixed',
+    resultHint:'Search a name/number for one Pokémon, a type such as electric/fire/water for several rows, or type all to browse a starter set.',
     listDefaults:{layout:'image-title-subtitle',image:'imageUrl',title:'name',subtitle:'types'},
     fields:[
       ['name','Name','text'],['number','Pokédex number','text'],['types','Type(s)','text'],['heightM','Height (m)','text'],['weightKg','Weight (kg)','text'],['imageUrl','Artwork image','image']
@@ -106,19 +106,41 @@ async function bookSearch(query){
   if(!rows.length)throw new Error('No matching book was found. Try another title, author or topic.');
   return rows;
 }
+const POKEMON_TYPES=new Set(['normal','fire','water','electric','grass','ice','fighting','poison','ground','flying','psychic','bug','rock','ghost','dragon','dark','steel','fairy']);
+function mapPokemon(data){
+  return {
+    name:titleCase(data?.name),
+    number:data?.id??'',
+    types:(data?.types||[]).map(x=>titleCase(x?.type?.name)).filter(Boolean).join(', '),
+    heightM:Math.round((Number(data?.height)||0)*10)/100,
+    weightKg:Math.round((Number(data?.weight)||0))/10,
+    imageUrl:data?.sprites?.other?.['official-artwork']?.front_default||data?.sprites?.front_default||''
+  };
+}
 async function pokemonLookup(query){
   const cleaned=String(query).trim().toLowerCase().replace(/\s+/g,'-');
   let data;
-  try{data=await fetchJson(`https://pokeapi.co/api/v2/pokemon/${encodeURIComponent(cleaned)}/`)}catch(err){if(String(err?.message||'').includes('404'))throw new Error('No matching Pokémon was found. Try its name or Pokédex number.');throw err}
+  try{data=await fetchJson(`https://pokeapi.co/api/v2/pokemon/${encodeURIComponent(cleaned)}/`)}catch(err){if(String(err?.message||'').includes('404'))throw new Error('No matching Pokémon was found. Try a name, Pokédex number, type such as electric, or all.');throw err}
   if(!data?.name)throw new Error('No matching Pokémon was found.');
-  return {
-    name:titleCase(data.name),
-    number:data.id??'',
-    types:(data.types||[]).map(x=>titleCase(x?.type?.name)).filter(Boolean).join(', '),
-    heightM:Math.round((Number(data.height)||0)*10)/100,
-    weightKg:Math.round((Number(data.weight)||0))/10,
-    imageUrl:data.sprites?.other?.['official-artwork']?.front_default||data.sprites?.front_default||''
-  };
+  return mapPokemon(data);
+}
+async function pokemonRowsFromNames(names){
+  const unique=[...new Set((names||[]).filter(Boolean))].slice(0,12);
+  const rows=(await Promise.all(unique.map(async name=>{
+    try{return await pokemonLookup(name)}catch{return null}
+  }))).filter(Boolean).sort((a,b)=>(Number(a.number)||99999)-(Number(b.number)||99999));
+  if(!rows.length)throw new Error('No Pokémon could be loaded for that browse search.');
+  return rows;
+}
+async function pokemonTypeSearch(type){
+  let data;
+  try{data=await fetchJson(`https://pokeapi.co/api/v2/type/${encodeURIComponent(type)}/`)}catch(err){if(String(err?.message||'').includes('404'))throw new Error('That Pokémon type was not found. Try electric, fire, water, grass or another type.');throw err}
+  const names=(data?.pokemon||[]).map(x=>x?.pokemon?.name).filter(Boolean);
+  return pokemonRowsFromNames(names);
+}
+async function pokemonBrowseAll(){
+  const data=await fetchJson('https://pokeapi.co/api/v2/pokemon?limit=12&offset=0');
+  return pokemonRowsFromNames((data?.results||[]).map(x=>x?.name));
 }
 
 export async function fetchApiResponse(serviceId, query){
@@ -129,6 +151,15 @@ export async function fetchApiResponse(serviceId, query){
     return {primary:rows[0],rows};
   }
   if(serviceId==='pokemon'){
+    const cleaned=q.toLowerCase().trim();
+    if(cleaned==='all'||cleaned==='browse'||cleaned==='list'){
+      const rows=await pokemonBrowseAll();
+      return {primary:rows[0],rows};
+    }
+    if(POKEMON_TYPES.has(cleaned)){
+      const rows=await pokemonTypeSearch(cleaned);
+      return {primary:rows[0],rows};
+    }
     const primary=await pokemonLookup(q);
     return {primary,rows:[primary]};
   }

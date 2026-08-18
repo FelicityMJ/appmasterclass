@@ -1,8 +1,6 @@
-# DataApp Studio — classroom V1.24
+# DataApp Studio — classroom V1.25
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.24 makes API projects more visual and beginner-friendly, and lets teachers release one assignment to selected pupils progressively.
-
-
+A child-friendly database + app builder aimed at roughly age 12–13. V1.25 adds multi-result Pokédex browsing so the same API can power both single-result and List apps.
 
 
 
@@ -14,6 +12,17 @@ A child-friendly database + app builder aimed at roughly age 12–13. V1.24 make
 
 
 
+
+
+
+
+## New in V1.25
+
+- Pokédex searches by **name/number** still return one Pokémon.
+- Searching by **type** such as `electric`, `fire`, `water` or `grass` returns several Pokémon that can fill a List.
+- Searching **`all`** returns a starter browse list.
+- The same API fields and List mappings work for both single and multiple results.
+- No Firebase rule changes are required for V1.25.
 
 ## New in V1.24
 
