@@ -117,7 +117,10 @@ const projectTemplates = {
     blocklyState:null,
     blocklyPages:{},
     capabilityLevel:1,
-    apiService:'weather'
+    apiService:'weather',
+    apiLastQuery:'',
+    apiLastResult:null,
+    apiLastRows:[]
   }
 };
 
@@ -138,6 +141,9 @@ function normaliseProject(project){
   const first=project.pages[0].id;
   project.capabilityLevel=Math.max(1,Math.min(5,Number(project.capabilityLevel)||1));
   if(!API_CATALOG[project.apiService])project.apiService='weather';
+  if(typeof project.apiLastQuery!=='string')project.apiLastQuery='';
+  if(!project.apiLastResult||typeof project.apiLastResult!=='object'||Array.isArray(project.apiLastResult))project.apiLastResult=null;
+  if(!Array.isArray(project.apiLastRows))project.apiLastRows=[];
   project.fields=Array.isArray(project.fields)?project.fields:[];
   for(const f of project.fields){
     if(f.type==='text') f.type='shortText';
@@ -381,7 +387,7 @@ function render(){
 function landingView(){
   if(state.authLoading) return `<div class="landing"><div class="hero-card auth-card"><div class="brand"><div class="brandmark">▦</div> DataApp Studio</div><h2>Connecting to your classroom…</h2><p class="muted">Checking Firebase sign-in.</p></div></div>`;
   if(CLOUD_MODE && state.user && state.role==='teacher-pending') return `<div class="landing"><div class="hero-card auth-card">
-    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.25</span></div>
+    <div class="brand" style="margin-bottom:18px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.26</span></div>
     <h2>Teacher approval needed</h2><p>You are signed in as <b>${escapeHtml(state.user.email||state.user.displayName||'Google user')}</b>, but this Google account has not been invited as a teacher yet.</p>
     <div class="notice"><b>Ask your DataApp Studio administrator to invite this exact Google email address.</b><div class="uid-box">${escapeHtml(state.user.email||'')}</div></div>
     <p class="muted">Once the administrator has invited the address, click <b>Check again</b>. The teacher account will be activated automatically; no Firebase UID needs to be copied.</p>
@@ -391,7 +397,7 @@ function landingView(){
 <div class="landing">
   <div class="hero">
     <div>
-      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.25 classroom</span></div>
+      <div class="brand" style="margin-bottom:28px"><div class="brandmark">▦</div> DataApp Studio <span class="pill">V1.26 classroom</span></div>
       <h1>Build apps.<br>Learn data.<br>See the code.</h1>
       <p>A pupil-friendly app studio: create a database, design a phone screen, connect it with visual blocks, then run it instantly.</p>
       <div class="project-meta" style="margin-top:22px"><span class="tag">Google sign-in</span><span class="tag">Teacher classes</span><span class="tag">20-image pupil limit</span><span class="tag">Shared image bank</span></div>
@@ -792,7 +798,8 @@ function phoneMarkup(mode='design'){
 }
 function listRowsMarkup(c,mode){
   const apiSource=projectCapabilityLevel()>=5&&c.listDataSource==='api';
-  const rows=apiSource?(mode==='test'?(state.testApiRows||[]):(state.apiPreviewRows||[])):(mode==='test'?(state.testRecords||[]):(state.project.records||[]));
+  const designApiRows=(state.apiPreviewRows&&state.apiPreviewRows.length)?state.apiPreviewRows:(state.project.apiLastRows||[]);
+  const rows=apiSource?(mode==='test'?(state.testApiRows||[]):designApiRows):(mode==='test'?(state.testRecords||[]):(state.project.records||[]));
   if(!rows.length)return `<div class="list-empty">${apiSource?'Test your API in Connect, or run a search in Test, to fill this List.':'No database records yet'}</div>`;
   return rows.map((r,i)=>{
     const image=c.listImageField?resolveImage(r[c.listImageField]):'';
@@ -819,7 +826,7 @@ function componentMarkup(c,mode){
   const attrs=mode==='design'?`data-component="${c.id}"`:`data-test-component="${c.id}"`;
   const textColor=escapeAttr(c.textColor||'#172033'),bg=escapeAttr(c.backgroundColor||'transparent');
   const directApi=c.contentSource==='api'&&c.apiField;
-  const apiResult=mode==='test'?state.testApiResult:state.apiPreview;
+  const apiResult=mode==='test'?state.testApiResult:(state.apiPreview||state.project.apiLastResult);
   const apiRaw=directApi?apiResult?.[c.apiField]:undefined;
   const apiValue=directApi?(apiRaw!==undefined&&apiRaw!==null&&apiRaw!==''?apiRaw:(c.type==='image'?(c.src||''):(mode==='design'?`API: ${apiFieldLabel(c.apiField)}`:''))):'';
   let inner='';
@@ -838,14 +845,38 @@ function componentMarkup(c,mode){
   return `<div class="screen-component ${sel}" ${attrs} style="${style}">${inner}${moveHandle}${handles}</div>`;
 }
 
+function apiMasterDetailGuide(){
+  if(projectCapabilityLevel()<5)return null;
+  const apiList=state.project.components.find(c=>c.type==='list'&&c.listDataSource==='api');
+  if(!apiList||state.project.pages.length<2)return null;
+  const listPage=state.project.pages.find(p=>p.id===(apiList.pageId||state.project.pages[0]?.id))||state.project.pages[0];
+  const detailsPage=state.project.pages.find(p=>p.id!==listPage?.id)||state.project.pages[1];
+  if(!detailsPage)return null;
+  const detailsComponents=(state.project.components||[]).filter(c=>(c.pageId||state.project.pages[0]?.id)===detailsPage.id&&['label','input','image'].includes(c.type));
+  const bound=detailsComponents.filter(c=>c.contentSource==='api'&&c.apiField);
+  const unbound=detailsComponents.filter(c=>!(c.contentSource==='api'&&c.apiField));
+  return {apiList,listPage,detailsPage,bound,unbound};
+}
+
+function apiMasterDetailHelpMarkup(){
+  const g=apiMasterDetailGuide();if(!g)return '';
+  const onList=state.currentPageId===g.listPage.id,onDetails=state.currentPageId===g.detailsPage.id;
+  const listName=escapeHtml(g.apiList.name||'List');
+  const listPageName=escapeHtml(g.listPage.name||'Home');
+  const detailsName=escapeHtml(g.detailsPage.name||'Details');
+  if(onList)return `<div class="notice api-master-detail-help"><b>🧩 ${listPageName} blocks — only one job:</b><div class="mini-block-recipe"><span>WHEN an item in <b>${listName}</b> is tapped</span><span>→ GO TO <b>${detailsName}</b></span></div><small>You do <b>not</b> need blocks to send the Pokémon/book data. The tapped row automatically becomes the current live API result.</small></div>`;
+  if(onDetails){const boundText=g.bound.length?g.bound.map(c=>`${escapeHtml(c.name)} → ${escapeHtml(apiFieldLabel(c.apiField))}`).join(' · '):'No placeholders are connected yet.';return `<div class="notice api-master-detail-help"><b>🎨 ${detailsName} gets its data in Design, not Blocks.</b><div class="connection-note">${boundText}</div>${g.unbound.length?`<small>Select ${g.unbound.map(c=>`<b>${escapeHtml(c.name)}</b>`).join(', ')} in Design and choose <b>Connected API</b> + the field it should show.</small>`:'<small>✓ Your visible placeholders are connected to API fields. Add a Back button event here only if you want one.</small>'}</div>`;}
+  return '';
+}
+
 function blockTutorialCard(){
   const c=state.project.components.find(x=>x.id===state.selectedComponent),capLevel=projectCapabilityLevel();
   const kind=state.blockTutorial||'overview',name=escapeHtml(c?.name||'your component');
   if(capLevel>=2){
     let title='Use your new interactive tools',body=`Level ${capLevel} keeps all the earlier blocks and only adds the tools needed for this project.`;
-    if(kind==='interactive'||kind==='overview'){title=`Program ${name}`;body=`<ol><li>Use <b>Events → when … changes</b> if something should happen as the user changes an input, or use a Button click event.</li><li>Use <b>Logic → if … then / else</b> to make a decision from an input value.</li><li>Use Screen blocks to show a message, show/hide something, or copy an input value into a label/text box.</li><li>Run the app and test both outcomes.</li></ol>`;}
+    if(kind==='interactive'||kind==='overview'){const g=apiMasterDetailGuide();if(capLevel>=5&&g){const here=state.currentPageId===g.listPage.id?`On <b>${escapeHtml(g.listPage.name)}</b>, program the List tap to open <b>${escapeHtml(g.detailsPage.name)}</b>.`:`On <b>${escapeHtml(g.detailsPage.name)}</b>, connect placeholders to API fields in Design; blocks are only needed for actions such as Back.`;title='Build your two-page live-data app';body=`<ol><li>${here}</li><li>The tapped List row automatically becomes the <b>current live API result</b>.</li><li>Do <b>not</b> create blocks to copy Name, Type or Artwork to Page 2 — connect those placeholders directly in Design.</li><li>Use <b>Navigation → go to</b> on the List page, and <b>go back</b> on the Details page if needed.</li></ol>`;}else{title=`Program ${name}`;body=`<ol><li>Use <b>Events → when … changes</b> if something should happen as the user changes an input, or use a Button click event.</li><li>Use <b>Logic → if … then / else</b> to make a decision from an input value.</li><li>Use Screen blocks to show a message, show/hide something, or copy an input value into a label/text box.</li><li>Run the app and test both outcomes.</li></ol>`;}}
     if(kind==='button'){title=`Program ${name}`;body=`<ol><li>Drag <b>when ${name} clicked</b> from Events.</li><li>${capLevel>=3?'To save a form, use one of the new Database record blocks.':'Put your IF / ELSE or Screen response blocks inside the event.'}</li><li>Snap the blocks together and test the button.</li></ol>`;}
-    if(kind==='list'){const apiList=c?.type==='list'&&c.listDataSource==='api';title='Program the List tap';body=`<ol><li>Open <b>Events</b> and drag <b>when an item in … is tapped</b>.</li><li>Choose <b>${name}</b>.</li><li>${apiList?'The tapped row automatically becomes the <b>current live API result</b>.':'The tapped row automatically becomes the <b>selected database record</b>.'}</li><li>Use <b>Navigation → go to</b> if you want to open a Details page.</li></ol>`;}
+    if(kind==='list'){const apiList=c?.type==='list'&&c.listDataSource==='api',g=apiMasterDetailGuide(),dest=g?.detailsPage?.name||'your Details page';title='Program the List tap';body=`<ol><li>Open <b>Events</b> and drag <b>when an item in … is tapped</b>.</li><li>Choose <b>${name}</b>.</li><li>${apiList?'The tapped row automatically becomes the <b>current live API result</b> — there are no data-copy blocks to add.':'The tapped row automatically becomes the <b>selected database record</b>.'}</li><li>Use <b>Navigation → go to ${escapeHtml(dest)}</b>.</li></ol>`;}
     if(kind==='datawrite'){title='Change database records';body=`<ol><li>In Design, map each form input to its <b>Database field to save</b>.</li><li>Put <b>add new record from form inputs</b> inside a button click to create a row.</li><li>Use <b>update selected record</b> or <b>delete selected record</b> when your app needs them.</li><li>Test mode uses a copy, so your saved project data is safe.</li></ol>`;}
     if(kind==='variables'){title='Remember a value with Variables';body=`<ol><li>Use <b>set variable</b> to give a value a starting point.</li><li>Use <b>change variable by</b> for scores and counters.</li><li>Use <b>set … to variable</b> to display the current value.</li></ol>`;}
     if(kind==='api'){const api=apiServiceInfo(state.project.apiService);title=`Connect ${api.name}`;body=`<ol><li>In Design, connect Labels, Images or a List to the API fields you want to show.</li><li>Put <b>🌐 ask ${api.name} using …</b> inside your Search button event.</li><li>Choose the Text Input that contains the user's search.</li><li>The connected components update automatically when the request succeeds.</li><li>Use <b>if last API request worked</b> to give a useful failure message.</li><li>Test a real search and an invalid one.</li></ol>`;}
@@ -860,10 +891,11 @@ function blockTutorialCard(){
 function apiPreviewMarkup(){
   if(state.apiPreviewLoading)return `<div class="api-preview-empty">⏳ Contacting the API…</div>`;
   if(state.apiPreviewError)return `<div class="notice warning"><b>Request failed:</b> ${escapeHtml(state.apiPreviewError)}</div>`;
-  const result=state.apiPreview;
+  const result=state.apiPreview||state.project.apiLastResult;
+  const rows=(state.apiPreviewRows&&state.apiPreviewRows.length)?state.apiPreviewRows:(state.project.apiLastRows||[]);
   if(!result)return `<div class="api-preview-empty">Try a request to see friendly data and the JSON response here.</div>`;
-  const service=apiServiceInfo(state.project.apiService),rowCount=(state.apiPreviewRows||[]).length;
-  return `${rowCount>1?`<div class="notice api-result-count"><b>${rowCount} results found.</b> A List component can display these rows automatically.</div>`:''}<div class="api-friendly-result">${service.fields.map(([key,label,kind])=>{const value=result[key]??'';return `<div><span>${escapeHtml(label)}</span>${kind==='image'&&/^https?:/i.test(String(value))?`<img src="${escapeAttr(value)}" alt="${escapeAttr(label)}">`:`<b>${escapeHtml(String(value))}</b>`}</div>`}).join('')}</div><details class="json-view"><summary>See the JSON your app received</summary><pre>${escapeHtml(JSON.stringify(rowCount>1?state.apiPreviewRows:result,null,2))}</pre></details>`;
+  const service=apiServiceInfo(state.project.apiService),rowCount=rows.length;
+  return `${rowCount>1?`<div class="notice api-result-count"><b>${rowCount} results found.</b> A List component can display these rows automatically.</div>`:''}<div class="api-friendly-result">${service.fields.map(([key,label,kind])=>{const value=result[key]??'';return `<div><span>${escapeHtml(label)}</span>${kind==='image'&&/^https?:/i.test(String(value))?`<img src="${escapeAttr(value)}" alt="${escapeAttr(label)}">`:`<b>${escapeHtml(String(value))}</b>`}</div>`}).join('')}</div><details class="json-view"><summary>See the JSON your app received</summary><pre>${escapeHtml(JSON.stringify(rowCount>1?rows:result,null,2))}</pre></details>`;
 }
 function apiView(){
   if(projectCapabilityLevel()<5)return `<div class="notice warning">The Connect/API workspace unlocks at Level 5.</div>`;
@@ -872,19 +904,20 @@ function apiView(){
   <div class="section-head"><div><h2>1. Choose your API</h2><p>Pick one safe classroom API and test a real request. Then use these same fields directly in Labels, Images and Lists in Design.</p></div><span class="tag capability-tag">Level 5 — Connected App</span></div>
   <div class="api-flow"><span>📱 Your app</span><b>→ request →</b><span>🌐 API</span><b>→ JSON →</b><span>✨ Your screen</span></div>
   <div class="api-library">${Object.values(API_CATALOG).map(api=>`<button class="api-card ${api.id===current.id?'active':''}" data-api-service="${escapeAttr(api.id)}" ${inspect?'disabled':''}><span class="api-emoji">${api.emoji}</span><b>${escapeHtml(api.name)}</b><small>${escapeHtml(api.provider)}</small><p>${escapeHtml(api.description)}</p></button>`).join('')}</div>
-  <div class="api-workbench"><section class="card"><div class="project-meta"><span class="tag">Selected API</span><span class="tag tag-good">No pupil API key</span></div><h3>${current.emoji} ${escapeHtml(current.name)}</h3><p class="muted">${escapeHtml(current.description)}</p><label>${escapeHtml(current.queryLabel)}</label><div class="api-test-row"><input id="apiTestQuery" value="${escapeAttr(state.apiTestQuery||'')}" placeholder="${escapeAttr(current.placeholder)}"><button class="btn primary" data-action="test-api" ${inspect?'':' '}>▶ Test request</button></div><h4>These are the fields you can use in your design</h4><div class="api-field-chips">${current.fields.map(([key,label])=>`<span title="JSON field: ${escapeAttr(key)}">${escapeHtml(label)} <code>${escapeHtml(key)}</code></span>`).join('')}</div><div class="notice"><b>How to use it:</b> ${escapeHtml(current.resultHint||'Choose fields in Design after testing the API.')}<br><br><b>Classroom safety:</b> these connectors use curated public endpoints and do not ask pupils to paste secret API keys into their apps.</div></section><section class="card api-preview"><h3>API response</h3>${apiPreviewMarkup()}</section></div>
+  <div class="api-workbench"><section class="card"><div class="project-meta"><span class="tag">Selected API</span><span class="tag tag-good">No pupil API key</span></div><h3>${current.emoji} ${escapeHtml(current.name)}</h3><p class="muted">${escapeHtml(current.description)}</p><label>${escapeHtml(current.queryLabel)}</label><div class="api-test-row"><input id="apiTestQuery" value="${escapeAttr(state.apiTestQuery||state.project.apiLastQuery||'')}" placeholder="${escapeAttr(current.placeholder)}"><button class="btn primary" data-action="test-api" ${inspect?'':' '}>▶ Test request</button></div><h4>These are the fields you can use in your design</h4><div class="api-field-chips">${current.fields.map(([key,label])=>`<span title="JSON field: ${escapeAttr(key)}">${escapeHtml(label)} <code>${escapeHtml(key)}</code></span>`).join('')}</div><div class="notice"><b>How to use it:</b> ${escapeHtml(current.resultHint||'Choose fields in Design after testing the API.')}<br><br><b>Classroom safety:</b> these connectors use curated public endpoints and do not ask pupils to paste secret API keys into their apps.</div></section><section class="card api-preview"><h3>API response</h3>${apiPreviewMarkup()}</section></div>
   <details class="card"><summary><b>Advanced: add local database data (optional)</b></summary><p class="muted">Most Level 5 Live Info Finder apps do not need any database fields or records. Open this only if you want to combine live API information with your own local data.</p><button class="btn small" data-tab="data">Open optional Data workspace →</button></details>`;
 }
 function bindApi(){
-  $$('[data-api-service]').forEach(btn=>btn.onclick=()=>{const next=btn.dataset.apiService;if(!API_CATALOG[next]||next===state.project.apiService)return;state.project.apiService=next;const valid=new Set(apiServiceInfo(next).fields.map(([key])=>key)),fallback=apiServiceInfo(next).fields[0]?.[0]||'';const imageFallback=apiServiceInfo(next).fields.find(([, ,kind])=>kind==='image')?.[0]||'';const textFallback=apiServiceInfo(next).fields.find(([, ,kind])=>kind!=='image')?.[0]||fallback;const fix=items=>(items||[]).forEach(item=>{if(item.type==='set_from_api'&&!valid.has(item.field))item.field=fallback;fix(item.then);fix(item.else)});fix(state.project.program);for(const c of state.project.components||[]){if(c.contentSource==='api'&&!valid.has(c.apiField))c.apiField=c.type==='image'?imageFallback:textFallback;if(c.type==='list'&&c.listDataSource==='api')applyApiListDefaults(c);}state.project.blocklyPages={};state.apiPreview=null;state.apiPreviewRows=[];state.apiPreviewError='';state.apiTestQuery='';saveProject();render();});
+  $$('[data-api-service]').forEach(btn=>btn.onclick=()=>{const next=btn.dataset.apiService;if(!API_CATALOG[next]||next===state.project.apiService)return;state.project.apiService=next;const valid=new Set(apiServiceInfo(next).fields.map(([key])=>key)),fallback=apiServiceInfo(next).fields[0]?.[0]||'';const imageFallback=apiServiceInfo(next).fields.find(([, ,kind])=>kind==='image')?.[0]||'';const textFallback=apiServiceInfo(next).fields.find(([, ,kind])=>kind!=='image')?.[0]||fallback;const fix=items=>(items||[]).forEach(item=>{if(item.type==='set_from_api'&&!valid.has(item.field))item.field=fallback;fix(item.then);fix(item.else)});fix(state.project.program);for(const c of state.project.components||[]){if(c.contentSource==='api'&&!valid.has(c.apiField))c.apiField=c.type==='image'?imageFallback:textFallback;if(c.type==='list'&&c.listDataSource==='api')applyApiListDefaults(c);}state.project.blocklyPages={};state.project.apiLastQuery='';state.project.apiLastResult=null;state.project.apiLastRows=[];state.apiPreview=null;state.apiPreviewRows=[];state.apiPreviewError='';state.apiTestQuery='';saveProject();render();});
   const input=$('#apiTestQuery');if(input)input.oninput=e=>state.apiTestQuery=e.target.value;
-  const test=$('[data-action="test-api"]');if(test)test.onclick=async()=>{state.apiTestQuery=$('#apiTestQuery')?.value||'';state.apiPreviewLoading=true;state.apiPreview=null;state.apiPreviewRows=[];state.apiPreviewError='';render();try{const response=await fetchApiResponse(state.project.apiService,state.apiTestQuery);state.apiPreview=response.primary;state.apiPreviewRows=response.rows||[];state.project.apiTested=true;saveProject()}catch(err){state.apiPreviewError=err.message||'The API request failed.'}finally{state.apiPreviewLoading=false;render()}};
+  const test=$('[data-action="test-api"]');if(test)test.onclick=async()=>{state.apiTestQuery=$('#apiTestQuery')?.value||'';state.apiPreviewLoading=true;state.apiPreview=null;state.apiPreviewRows=[];state.apiPreviewError='';render();try{const response=await fetchApiResponse(state.project.apiService,state.apiTestQuery);state.apiPreview=response.primary;state.apiPreviewRows=response.rows||[];state.project.apiTested=true;state.project.apiLastQuery=state.apiTestQuery;state.project.apiLastResult=clone(response.primary||{});state.project.apiLastRows=clone((response.rows||[]).slice(0,12));saveProject()}catch(err){state.apiPreviewError=err.message||'The API request failed.'}finally{state.apiPreviewLoading=false;render()}};
 }
 
 function blocksView(){const pg=currentPage();return `<div class="section-head"><div><h2>Make ${escapeHtml(pg?.name||'this page')} work</h2><p>Each page has its own Blockly workspace. This project only shows the programming tools unlocked for its capability level.</p></div><button class="btn good" data-tab="test">▶ Run app</button></div>
 <div class="capability-banner"><div><b>${escapeHtml(capabilityLabel(projectCapabilityLevel()))}</b><span>${escapeHtml(capabilityInfo(projectCapabilityLevel()).description)}</span></div><span class="tag">Blockly toolbox filtered</span></div>
 <div class="page-strip blocks-page-strip"><div class="page-tabs">${state.project.pages.map((p,i)=>`<button class="page-tab ${p.id===state.currentPageId?'active':''}" data-block-page="${p.id}"><span>${escapeHtml(p.name)}</span><small>Page ${i+1} blocks</small></button>`).join('')}</div><div class="page-actions"><span class="tag">Editing: ${escapeHtml(pg?.name||'Page')}</span></div></div>
 ${blockTutorialCard()}
+${apiMasterDetailHelpMarkup()}
 <div class="blockly-layout"><section class="blockly-card"><div class="blockly-help"><b>Remember:</b> <span>${projectCapabilityLevel()>=5?'Design can connect components directly to API fields. Blocks control when the API request happens and what to do on success or failure.':'A list tap chooses the selected database record. Screen blocks display fields from it, and Navigation blocks move between pages.'}</span></div><div id="blocklyDiv" class="blockly-workspace"></div></section>
 <aside class="code-panel blockly-code"><div style="display:flex;justify-content:space-between;align-items:center"><h3>Show code</h3><span class="tag">Live</span></div><div class="code-toggle"><button data-code-mode="python" class="${state.codeMode==='python'?'active':''}">Python idea</button><button data-code-mode="plain" class="${state.codeMode==='plain'?'active':''}">Plain English</button></div><div class="codebox" id="generatedCode">${escapeHtml(generateCode())}</div><div class="mini-checks">${checklistBadges()}</div><div class="notice" style="margin-top:12px">${autoBlocksEnabled()?'Your teacher has enabled <b>Auto-add block support</b>. Design shortcuts may create starter blocks for you. You can still change them yourself.':'Design shortcuts will <b>not</b> create Blockly for you. Use the tutorial above and build the blocks yourself.'}</div></aside></div>`}
 
@@ -905,7 +938,7 @@ function blockMarkup(b){
 
 function testView(){const inspector=projectCapabilityLevel()>=5?`<div class="record-card api-test-inspector"><h3>🌐 Last API result</h3>${testApiInspector()}</div>`:`<div class="record-card"><h3>Current database record</h3>${recordInspector()}</div>`;return `<div class="section-head"><div><h2>Test your app</h2><p>Use the buttons on the phone. The debugger explains what is happening.</p></div><div><button class="btn" data-action="restart-test">↻ Restart</button> <button class="btn primary" data-tab="blocks">Edit blocks</button></div></div>
 <div class="test-grid"><section class="test-stage"><div>${phoneMarkup('test')}</div></section><aside class="test-side">${inspector}<div class="debug"><h3>🐞 What's happening?</h3><div id="debugLog">${state.testLogs.length?state.testLogs.map(l=>`<div class="log-line ${l.kind||''}">${escapeHtml(l.text)}</div>`).join(''):`<div class="log-line">Press Restart or use the app buttons to see events here.</div>`}</div></div></aside></div>`}
-function testApiInspector(){if(state.testApiError)return `<div class="notice warning">${escapeHtml(state.testApiError)}</div>`;if(!state.testApiResult||!Object.keys(state.testApiResult).length)return `<div class="empty-note">Run a search to see the API result here.</div>`;return `<pre class="mini-json">${escapeHtml(JSON.stringify(state.testApiResult,null,2))}</pre>`}
+function testApiInspector(){if(state.testApiError)return `<div class="notice warning">${escapeHtml(state.testApiError)}</div>`;if(!state.testApiResult||!Object.keys(state.testApiResult).length)return `<div class="empty-note">No API result yet. Go to Connect and test a search, or run a search from your app.</div>`;return `<pre class="mini-json">${escapeHtml(JSON.stringify(state.testApiResult,null,2))}</pre>`}
 function recordInspector(){const rows=Array.isArray(state.testRecords)?state.testRecords:state.project.records;const r=rows[state.currentRecord]||{}; return `<div class="record-grid">${state.project.fields.map(f=>`<dt>${escapeHtml(f.name)}</dt><dd>${f.type==='image'?'[image]':escapeHtml(String(r[f.id]??''))}</dd>`).join('')}</div>`}
 
 
@@ -1573,8 +1606,11 @@ function initialInteractiveValue(c){
 function startTest(withRender=true){
   state.currentRecord=0;state.currentPageId=state.project.pages[0]?.id||'screen1';state.pageHistory=[];state.testLogs=[];state.tutorialTested=true;
   state.testRecords=clone(state.project.records||[]);
-  state.testValues={};state.testVisibility={};state.testVariables={};state.testDisplayValues={};state.testApiResult={};state.testApiRows=[];state.testApiSuccess=false;state.testApiError='';
+  const seedApiResult=state.apiPreview||state.project.apiLastResult||{};
+  const seedApiRows=(state.apiPreviewRows&&state.apiPreviewRows.length)?state.apiPreviewRows:(state.project.apiLastRows||[]);
+  state.testValues={};state.testVisibility={};state.testVariables={};state.testDisplayValues={};state.testApiResult=clone(seedApiResult||{});state.testApiRows=clone(seedApiRows||[]);state.testApiSuccess=!!(state.testApiRows.length||Object.keys(state.testApiResult||{}).length);state.testApiError='';
   for(const c of state.project.components||[]){state.testVisibility[c.id]=c.visible!==false;if(interactiveComponentType(c.type))state.testValues[c.id]=initialInteractiveValue(c);}
+  if(state.testApiRows.length)log(`Loaded ${state.testApiRows.length} result${state.testApiRows.length===1?'':'s'} from your last Connect test`,'good');
   log(`${pageName(state.currentPageId)} opened`,'good');const opening=runEvent('open',null,{pageId:state.currentPageId});if(withRender)render();opening.then(()=>{if(state.tab==='test')render()})
 }
 function bindTest(){

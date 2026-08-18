@@ -1,8 +1,6 @@
-# DataApp Studio — classroom V1.25
+# DataApp Studio — classroom V1.26
 
-A child-friendly database + app builder aimed at roughly age 12–13. V1.25 adds multi-result Pokédex browsing so the same API can power both single-result and List apps.
-
-
+A child-friendly database + app builder aimed at roughly age 12–13. V1.26 makes Connected App testing and two-page API List → Details projects much clearer for beginners.
 
 
 
@@ -15,6 +13,19 @@ A child-friendly database + app builder aimed at roughly age 12–13. V1.25 adds
 
 
 
+
+
+
+
+## New in V1.26
+
+- the last successful Connect API search is now saved with the project;
+- Design keeps using that saved result after a reload;
+- Test starts with the same saved API rows, so a List that was visible in Design is also visible immediately in Test;
+- restarting Test restores the saved Connect result instead of unexpectedly emptying the List;
+- Blocks now recognises a two-page API List → Details pattern and gives page-specific beginner instructions using the pupil's real List/page/component names;
+- tapping an API List row still automatically makes that row the current live API result — no data-copy blocks are needed;
+- no Firebase rule changes are required.
 
 ## New in V1.25
 

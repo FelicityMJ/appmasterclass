@@ -215,3 +215,8 @@ button{cursor:pointer}
 
 /* V1.24 — universal data sources + staged assignments */
 .api-binding-card{border:1px solid #cfd8ff;background:#f8f9ff;border-radius:14px;padding:12px;margin:12px 0}.api-binding-card .prop-section-title{margin-top:0}.api-result-count{margin-bottom:12px}.assignment-pupil-picker{border:1px solid var(--line);background:#fafbff;border-radius:14px;padding:12px;margin:-2px 0 14px}.pupil-picker-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}.pupil-check-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;max-height:250px;overflow:auto;padding:2px}.pupil-check{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);background:#fff;border-radius:12px;padding:10px;cursor:pointer}.pupil-check input{margin-top:3px}.pupil-check span{display:flex;flex-direction:column;min-width:0}.pupil-check small{color:var(--muted);overflow:hidden;text-overflow:ellipsis}.assignment-manage-modal{max-width:760px}.assignment-audience select{font-weight:650}
+
+/* V1.26 — beginner API master/detail guidance */
+.api-master-detail-help{margin:12px 0 16px}
+.mini-block-recipe{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0;font-weight:700}
+.mini-block-recipe span{padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}
